@@ -9,6 +9,15 @@ export default tseslint.config(
     ignores: ["dist", ".wrangler", "coverage", "playwright-report", "test-results"]
   },
   js.configs.recommended,
+  {
+    files: ["scripts/**/*.{js,mjs,cjs}"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.browser
+      }
+    }
+  },
   ...tseslint.configs.recommendedTypeChecked.map((config) => ({
     ...config,
     files: ["**/*.{ts,tsx}"]
