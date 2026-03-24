@@ -24,8 +24,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Repair Rollup optional dependency on Linux
-        run: npm install --no-save @rollup/rollup-linux-x64-gnu@$(node -p "require('./node_modules/rollup/package.json').optionalDependencies['@rollup/rollup-linux-x64-gnu']")
+      - name: Repair native optional dependencies on Linux
+        run: npm install --no-save @rollup/rollup-linux-x64-gnu@$(node -p "require('./node_modules/rollup/package.json').optionalDependencies['@rollup/rollup-linux-x64-gnu']") lightningcss-linux-x64-gnu@$(node -p "require('./node_modules/lightningcss/package.json').optionalDependencies['lightningcss-linux-x64-gnu']")
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
