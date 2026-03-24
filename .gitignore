@@ -1,0 +1,17 @@
+node_modules
+dist
+.wrangler
+coverage
+playwright-report
+test-results
+output
+.tmp
+.codex
+progress.md
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+*.log
+*.tsbuildinfo
