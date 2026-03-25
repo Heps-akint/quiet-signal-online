@@ -51,13 +51,13 @@ function bannerFromEvent(event: ServerEvent): BannerState | null {
       return {
         celebration: null,
         tone: "warning",
-        text: `Life lost. ${event.card} was played too early.`
+        text: `Life lost. ${event.card} landed too early.`
       };
     case "pause_state_changed":
       return {
         celebration: null,
         tone: event.resumed ? "neutral" : "warning",
-        text: event.resumed ? "Round resumed." : "Round paused."
+        text: event.resumed ? "Round back on." : "Round paused."
       };
     case "scan_state_changed":
       return {
@@ -65,8 +65,8 @@ function bannerFromEvent(event: ServerEvent): BannerState | null {
         tone: event.accepted ? "neutral" : "warning",
         text: event.resolved
           ? event.accepted
-            ? "Scan used."
-            : "Scan declined."
+            ? "Scan spent."
+            : "Scan skipped."
           : "Scan requested."
       };
     case "level_cleared":
@@ -79,13 +79,13 @@ function bannerFromEvent(event: ServerEvent): BannerState | null {
       return {
         celebration: "run_complete",
         tone: "success",
-        text: "Run complete."
+        text: "Run finished."
       };
     case "game_lost":
       return {
         celebration: null,
         tone: "danger",
-        text: "No lives left."
+        text: "Out of lives."
       };
     case "room_error":
       return {

@@ -126,7 +126,7 @@ function describeConnectionState(state: ConnectionState): string {
     case "closed":
       return "Reconnecting";
     case "error":
-      return "Problem";
+      return "Trouble";
     case "idle":
       return "Waiting";
   }
@@ -173,7 +173,7 @@ function describeTablePhase(phase: RoomState["phase"], focusRemainingMs: number)
 
   switch (phase) {
     case "waiting":
-      return "lobby";
+      return "waiting";
     case "between_levels":
       return "next level";
     case "in_round":
@@ -200,23 +200,66 @@ function describeLevelRewards(rewards: { life: boolean; scan: boolean }): string
   return labels.join(" and ");
 }
 
-function waitingOverlayBody(snapshot: RoomState): string {
-  if (snapshot.inviteLink) {
-    return "Share the invite link with your partner. The room opens as soon as both players join.";
+function describePlayerPresence(player: RoomState["players"]["host"]): string {
+  if (player.connected) {
+    return "Here";
   }
 
-  return "Waiting for both players to join the room.";
+  if (player.hasJoined) {
+    return "Coming back";
+  }
+
+  return "Not here yet";
+}
+
+function waitingOverlayBody(snapshot: RoomState): string {
+  if (snapshot.inviteLink) {
+    return "Send the invite link. The room opens as soon as your partner opens it.";
+  }
+
+  return "Waiting for both players to get into the room.";
 }
 
 function betweenLevelsBody(snapshot: RoomState): string {
   if (snapshot.summary?.kind === "level_cleared") {
     const rewards = describeLevelRewards(snapshot.summary.rewards);
     return rewards
-      ? `${snapshot.summary.message} Reward: ${rewards}. Press ready when you're both set.`
-      : `${snapshot.summary.message} Press ready when you're both set.`;
+      ? `${snapshot.summary.message} ${rewards}. Hit ready when you both want the next hand.`
+      : `${snapshot.summary.message} Hit ready when you both want the next hand.`;
   }
 
-  return "Press ready when you're both set for the next level.";
+  return "Hit ready when you both want the next hand.";
+}
+
+function emptyPileBody(phase: RoomState["phase"]): string {
+  switch (phase) {
+    case "waiting":
+    case "between_levels":
+      return "Cards land here once the round starts.";
+    case "focus_transition":
+    case "in_round":
+    case "paused":
+      return "Nothing on the pile yet.";
+    case "won":
+    case "lost":
+      return "Round finished.";
+  }
+}
+
+function emptyHandBody(phase: RoomState["phase"]): string {
+  switch (phase) {
+    case "waiting":
+    case "between_levels":
+      return "Your cards show up here when the level starts.";
+    case "focus_transition":
+      return "Hold for the cue.";
+    case "in_round":
+    case "paused":
+      return "Hand clear.";
+    case "won":
+    case "lost":
+      return "No cards left in hand.";
+  }
 }
 
 type BannerBurstPiece = {
@@ -707,12 +750,12 @@ function LandingScreen() {
         body: JSON.stringify({})
       });
       if (!response.ok) {
-        throw new Error("Couldn't start the room.");
+        throw new Error("Couldn't open the room.");
       }
       const payload = createRoomResponseSchema.parse(await readJsonOrThrow(response));
       window.location.assign(payload.hostInviteUrl);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Couldn't start the room.");
+      setError(caughtError instanceof Error ? caughtError.message : "Couldn't open the room.");
       setBusy(false);
     }
   };
@@ -736,14 +779,14 @@ function LandingScreen() {
         >
           <p className="mb-3 text-sm uppercase tracking-[0.32em] text-[var(--accent-soft)]">Quiet Signal</p>
           <h1 className="display-face max-w-3xl text-balance text-4xl font-black tracking-tight text-[var(--card-front)] sm:text-6xl">
-            A private timing game for two.
+            Two people, one pile, no talking once the round starts.
           </h1>
           <p className="mt-5 max-w-xl text-balance text-lg leading-8 text-[var(--muted)]">
-            Open a room. Share the link. Play in silence.
+            Open a room, send the link, get on a call, then play the cards in order by feel.
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
-            <div className="hero-note">Best while on a call</div>
-            <div className="hero-note">No accounts</div>
+            <div className="hero-note">Works best on a call</div>
+            <div className="hero-note">No sign-in</div>
             <div className="hero-note">Private link</div>
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -765,13 +808,13 @@ function LandingScreen() {
               How to play
             </button>
             <div className="hero-chip rounded-full px-4 py-2 text-sm">
-              2 players. Private link. Mobile + desktop.
+              2 players. Phone or desktop.
             </div>
           </div>
           <div className="mt-10 flex flex-wrap gap-2">
             <StepPill label="1. Open room" />
-            <StepPill label="2. Share link" />
-            <StepPill label="3. Play" />
+            <StepPill label="2. Send link" />
+            <StepPill label="3. Play quiet" />
           </div>
           <HeroGuideCue
             onClick={scrollToHowToPlay}
@@ -805,9 +848,9 @@ function HeroGuideCue(props: { reducedMotion: boolean; onClick: () => void }) {
       type="button"
     >
       <div className="hero-guide-cue-copy">
-        <p className="hero-guide-cue-kicker">New here?</p>
-        <p className="hero-guide-cue-title">Read how to play below</p>
-        <p className="hero-guide-cue-body">Quick rules and live examples before you open a room.</p>
+        <p className="hero-guide-cue-kicker">Never played?</p>
+        <p className="hero-guide-cue-title">Read the 30-second rules</p>
+        <p className="hero-guide-cue-body">See the round flow before you open a room.</p>
       </div>
       <motion.span
         animate={props.reducedMotion ? undefined : { y: [0, 5, 0] }}
@@ -842,7 +885,7 @@ function LandingTablePreview() {
         <div className="landing-rail flex items-center justify-between rounded-[1.5rem] px-4 py-4">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-[var(--accent-soft)]">Partner</p>
-            <p className="mt-2 text-lg font-semibold text-[var(--card-front)]">Your partner</p>
+            <p className="mt-2 text-lg font-semibold text-[var(--card-front)]">Partner hand</p>
           </div>
           <div className="flex gap-2">
             <div className="landing-card-back h-[3.9rem] w-11 rounded-[0.95rem]" />
@@ -859,7 +902,7 @@ function LandingTablePreview() {
               <div className="landing-face-card rotate-[3deg]">42</div>
             </div>
             <p className="mt-5 text-sm leading-7 text-[var(--muted)]">
-              Lowest card goes first.
+              The smallest number that fits goes down next.
             </p>
           </div>
         </div>
@@ -868,7 +911,7 @@ function LandingTablePreview() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.28em] text-[var(--accent-soft)]">Your hand</p>
-              <p className="mt-2 text-base text-[var(--muted)]">Play your lowest card.</p>
+              <p className="mt-2 text-base text-[var(--muted)]">Only the lowest card is live.</p>
             </div>
             <div className="count-pill rounded-full px-3 py-1 text-sm">3 cards</div>
           </div>
@@ -900,64 +943,64 @@ function HowToPlaySection() {
         <div className="guide-intro">
           <p className="guide-kicker">How to play</p>
           <h2 className="display-face mt-3 max-w-xl text-balance text-3xl font-black text-[var(--card-front)] sm:text-5xl">
-            Read this once. Then trust the timing.
+            Say what you need to say before the cue.
           </h2>
           <p className="guide-lead mt-5 max-w-lg text-balance text-base leading-8 text-[var(--muted)] sm:text-lg">
-            Each player gets a sorted hand. Once the focus cue appears, stop talking through the timing and
-            play the lowest card that should come next in the shared pile.
+            Both hands are already sorted. When the focus cue shows up, stop talking. From there, you
+            and your partner play by timing alone.
           </p>
           <div className="mt-6 space-y-3">
             <div className="guide-note">
               <span className="guide-note-mark" />
-              <span>Talk before the round, not through the round.</span>
+              <span>Talk before the cue. Not during the round.</span>
             </div>
             <div className="guide-note">
               <span className="guide-note-mark" />
-              <span>Wrong order costs the room a life.</span>
+              <span>If someone jumps the order, the room loses a life.</span>
             </div>
             <div className="guide-note">
               <span className="guide-note-mark" />
-              <span>Spend a scan to discard the lowest card from both hands.</span>
+              <span>If both of you feel stuck, spend a scan.</span>
             </div>
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <GuideCard
-            body="One player opens the room and sends the private invite link. The round setup begins as soon as both players arrive."
+            body="One player opens the room and sends the invite. As soon as both of you arrive, the level is ready."
             demo={<InviteFlowDemo reducedMotion={reducedMotion} />}
-            foot="No accounts. No lobby code to type."
+            foot="No accounts. No code to type."
             kicker="1. Join"
-            title="Open the room and share the link."
+            title="Open the room. Send the link."
           />
           <GuideCard
-            body="When the focus cue appears, get quiet. That short pause is where both players settle into the same rhythm."
+            body="The focus cue gives both players the same clean start. After that, stop narrating and trust the timing."
             demo={<FocusDemo reducedMotion={reducedMotion} />}
-            foot="Silence during the round is the whole point."
+            foot="Talking through the round usually makes it worse."
             kicker="2. Focus"
-            title="Start together, then stop talking."
+            title="Hear the cue, then go quiet."
           />
           <GuideCard
-            body="Your hand is already sorted. Only your lowest card matters. Play it when it feels like the next number in the sequence."
+            body="Your hand is sorted already. Watch the smallest card you still have and drop it when it feels next."
             demo={<LowestCardDemo reducedMotion={reducedMotion} />}
-            foot="Clear every card in both hands to finish the level."
+            foot="Clear both hands to finish the level."
             kicker="3. Play"
-            title="Always play your lowest card."
+            title="Only your lowest card matters."
           />
           <GuideCard
-            body="If a lower hidden card should have gone first, the room loses a life. When both players feel stuck, spend a scan for a reset."
+            body="If a smaller hidden card should have landed first, you lose a life. When the table feels jammed, spend a scan to burn the lowest card from both hands."
             demo={<RiskAndScanDemo reducedMotion={reducedMotion} />}
-            foot="A scan discards the lowest card from each hand."
+            foot="Scans are limited, so save them for real doubt."
             kicker="4. Recover"
-            title="Protect lives. Use scans when the rhythm slips."
+            title="Use scans before panic takes over."
           />
         </div>
       </div>
 
       <div className="guide-rule-strip mt-8 flex flex-wrap gap-2">
-        <div className="guide-rule-chip">Clear every card to advance.</div>
-        <div className="guide-rule-chip">Finish level 12 to win the full run.</div>
-        <div className="guide-rule-chip">Best played while on a call, but keep the round itself silent.</div>
+        <div className="guide-rule-chip">Clear both hands to move on.</div>
+        <div className="guide-rule-chip">Beat level 12 to finish the run.</div>
+        <div className="guide-rule-chip">Being on a call helps. Talking through the round does not.</div>
       </div>
     </motion.section>
   );
@@ -1050,7 +1093,7 @@ function FocusDemo(props: { reducedMotion: boolean }) {
         />
       </motion.div>
       <div className="guide-demo-count">2s</div>
-      <p className="guide-demo-label">No talking through the timing.</p>
+      <p className="guide-demo-label">No talking once it starts.</p>
     </div>
   );
 }
@@ -1266,7 +1309,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
     return (
       <CenteredMessage
         body="This invite link is incomplete. Open the full link that was shared with you."
-        title="Invite Link Incomplete"
+        title="Invite link incomplete"
       />
     );
   }
@@ -1281,8 +1324,8 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
             </button>
           ) : undefined
         }
-        body={error ?? "Joining the room and opening the live connection."}
-        title="Joining Room"
+        body={error ?? "Joining the room."}
+        title="Joining room"
       />
     );
   }
@@ -1318,9 +1361,14 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
           <p className="text-xs uppercase tracking-[0.34em] text-[var(--accent-soft)]">
             Room {snapshot.roomId}
           </p>
-          <h1 className="display-face mt-2 text-3xl font-black tracking-tight text-[var(--card-front)] sm:text-4xl">
-            Level {snapshot.currentLevel} of {snapshot.maxLevel}
-          </h1>
+          <div className="room-level-row mt-2 flex flex-wrap items-end gap-3">
+            <h1 className="display-face text-3xl font-black tracking-tight text-[var(--card-front)] sm:text-4xl">
+              Level {snapshot.currentLevel}
+            </h1>
+            <div className="room-progress-pill rounded-full px-3 py-1 text-sm">
+              of {snapshot.maxLevel}
+            </div>
+          </div>
         </div>
         <div className="room-header-actions flex flex-wrap items-center gap-2">
           <ConnectionPill state={connectionState} />
@@ -1436,7 +1484,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
                     />
                   </div>
                 ) : null}
-                <CenterPile pile={snapshot.pile} reducedMotion={reducedMotion} />
+                <CenterPile phase={snapshot.phase} pile={snapshot.pile} reducedMotion={reducedMotion} />
               </div>
             </div>
 
@@ -1446,7 +1494,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
                   <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
                     Your hand
                   </p>
-                  <p className="mt-2 text-sm text-[var(--muted)]">Only your lowest card can be played.</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">Only your lowest card is live.</p>
                 </div>
                 <div className="count-pill rounded-full px-3 py-1 text-sm">
                   {countLabel(self.handCount, "card")}
@@ -1520,7 +1568,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
                   ))}
                   {self.hand.length === 0 ? (
                     <div className="hand-empty rounded-[1.2rem] px-4 py-6 text-sm text-[var(--muted)]">
-                      Your hand is empty.
+                      {emptyHandBody(snapshot.phase)}
                     </div>
                   ) : null}
                 </div>
@@ -1549,18 +1597,23 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
             {snapshot.phase === "waiting" || (snapshot.phase === "between_levels" && !isHoldingLevelAdvanceOverlay) ? (
               <CenterOverlay key="lobby">
                 <p className="text-xs uppercase tracking-[0.38em] text-[var(--accent-soft)]">
-                  {snapshot.phase === "waiting" ? "Lobby" : "Next level"}
+                  {snapshot.phase === "waiting" ? "Waiting room" : "Next level"}
                 </p>
                 <h2 className="mt-2 text-balance text-3xl font-black text-[var(--card-front)]">
                   {snapshot.phase === "waiting"
                     ? other.hasJoined
                       ? "Both players are here"
-                      : "Waiting for your partner"
-                    : `Level ${snapshot.currentLevel} is ready`}
+                      : "Waiting on your partner"
+                    : `Level ${snapshot.currentLevel} ready`}
                 </h2>
                 <p className="mx-auto mt-3 max-w-[23rem] text-balance text-sm leading-7 text-[var(--muted)]">
                   {snapshot.phase === "waiting" ? waitingOverlayBody(snapshot) : betweenLevelsBody(snapshot)}
                 </p>
+                {snapshot.phase === "waiting" && snapshot.inviteLink ? (
+                  <div className="room-overlay-actions mt-6 flex flex-wrap justify-center gap-3">
+                    <CopyInviteButton inviteLink={snapshot.inviteLink} />
+                  </div>
+                ) : null}
                 {snapshot.phase === "between_levels" ? (
                   <button
                     className={buttonClass("primary")}
@@ -1581,12 +1634,12 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
                   {snapshot.phase === "won" ? "Run complete" : "Out of lives"}
                 </p>
                 <h2 className="mx-auto mt-2 max-w-[20rem] text-balance text-3xl font-black text-[var(--card-front)]">
-                  {snapshot.phase === "won" ? "All 12 levels cleared." : "No lives left."}
+                  {snapshot.phase === "won" ? "All 12 levels down." : "Out of lives."}
                 </h2>
                 <p className="mx-auto mt-3 max-w-[23rem] text-balance text-sm leading-7 text-[var(--muted)]">
                   {snapshot.phase === "won"
-                    ? "Same room, fresh run. Press rematch when you're both ready."
-                    : "Press rematch to start again from level 1."}
+                    ? "Same room, fresh run. Hit rematch when you're both ready."
+                    : "Same room, back to level 1. Hit rematch when you want another run."}
                 </p>
                 <button
                   className={buttonClass("primary")}
@@ -1617,12 +1670,12 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
           )}
         >
           <PlayerStatusCard
-            actionLabel={snapshot.phase === "between_levels" ? (self.ready ? "Ready" : "Waiting") : "You"}
+            actionLabel={snapshot.phase === "between_levels" ? (self.ready ? "Ready" : "Not ready") : "You"}
             player={self}
             title="You"
           />
           <PlayerStatusCard
-            actionLabel={other.hasJoined ? (other.connected ? "Connected" : "Rejoining") : "Invite pending"}
+            actionLabel={other.hasJoined ? (other.connected ? "Here" : "Away") : "Invite pending"}
             player={other}
             title="Partner"
           />
@@ -1641,24 +1694,24 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
           />
           <div className="table-summary-card panel-surface rounded-[1.6rem] p-5">
             <h2 className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
-              Table
+              Quick read
             </h2>
             <dl className="table-state-list mt-4 grid gap-3 text-sm text-[var(--muted)]">
               <div className="table-state-row flex items-center justify-between rounded-[1rem] px-3 py-2">
-                <dt>Connection</dt>
-                <dd>{describeConnectionState(connectionState)}</dd>
+                <dt>Phase</dt>
+                <dd>{tablePhaseLabel}</dd>
               </div>
               <div className="table-state-row flex items-center justify-between rounded-[1rem] px-3 py-2">
-                <dt>Your next card</dt>
+                <dt>Your next</dt>
                 <dd>{lowestPlayableValue ?? "-"}</dd>
               </div>
               <div className="table-state-row flex items-center justify-between rounded-[1rem] px-3 py-2">
-                <dt>Partner cards</dt>
+                <dt>Partner holds</dt>
                 <dd>{countLabel(other.handCount, "card")}</dd>
               </div>
             </dl>
             <div className="table-controls-note table-state-note mt-4 rounded-[1rem] px-3 py-3 text-sm leading-7 text-[var(--muted)]">
-              Keys: Space plays, P pauses, S requests a scan, F toggles fullscreen.
+              Space play. P pause. S scan. F fullscreen.
             </div>
           </div>
         </motion.aside>
@@ -1797,7 +1850,7 @@ function useRoomSession(roomId: string, token: string | null) {
   const sendEvent = (event: ClientEvent) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setError("Connection lost. Reconnecting...");
+      setError("Connection dropped. Reconnecting...");
       return;
     }
     socket.send(JSON.stringify(clientEventSchema.parse(event)));
@@ -1843,7 +1896,7 @@ function CopyInviteButton(props: { inviteLink: string }) {
       }}
       type="button"
     >
-      {copied ? "Copied" : "Copy invite link"}
+      {copied ? "Copied" : "Copy invite"}
     </button>
   );
 }
@@ -1865,7 +1918,7 @@ function PlayerRail(props: {
           {props.player.displayName}
         </p>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          {props.player.connected ? "Connected" : props.player.hasJoined ? "Reconnecting" : "Waiting to join"}
+          {describePlayerPresence(props.player)}
         </p>
       </div>
       <div className="flex gap-2">
@@ -1884,7 +1937,11 @@ function PlayerRail(props: {
   );
 }
 
-function CenterPile(props: { pile: RoomState["pile"]; reducedMotion: boolean }) {
+function CenterPile(props: {
+  pile: RoomState["pile"];
+  phase: RoomState["phase"];
+  reducedMotion: boolean;
+}) {
   return (
     <div className="pile-grid flex min-h-72 flex-wrap items-center justify-center gap-3 content-center">
       {props.pile.slice(-18).map((card) => (
@@ -1908,7 +1965,7 @@ function CenterPile(props: { pile: RoomState["pile"]; reducedMotion: boolean }) 
       {props.pile.length === 0 ? (
         <div className="empty-pile-state">
           <div className="empty-pile-card" />
-          <p className="mt-3 text-sm text-[var(--muted)]">No cards played yet.</p>
+          <p className="mt-3 text-sm text-[var(--muted)]">{emptyPileBody(props.phase)}</p>
         </div>
       ) : null}
     </div>
@@ -1932,15 +1989,19 @@ function PendingRequestPanel(props: {
   const title =
     pending.kind === "pause"
       ? isAwaitingViewer
-        ? "Resume the round?"
-        : "Waiting for your partner."
+        ? "Pause here?"
+        : "Pause requested"
       : isAwaitingViewer
-        ? "Use a scan?"
-        : "Waiting for your partner.";
+        ? "Spend one scan?"
+        : "Scan requested";
   const body =
     pending.kind === "pause"
-      ? "The round resumes when both players confirm."
-      : "Reveal and discard the lowest card in both hands.";
+      ? isAwaitingViewer
+        ? "Both players need to confirm before the focus cue runs again."
+        : "Waiting on your partner to answer."
+      : isAwaitingViewer
+        ? "This burns the lowest card from both hands."
+        : "Waiting on your partner to answer.";
 
   return (
     <motion.div
@@ -1964,7 +2025,7 @@ function PendingRequestPanel(props: {
               isAwaitingViewer ? "request-panel-state-pending" : "request-panel-state-waiting"
             )}
           >
-            {isAwaitingViewer ? "Action needed" : "Waiting"}
+            {isAwaitingViewer ? "Your call" : "Waiting"}
           </div>
         </div>
         <p className="request-panel-title">{title}</p>
@@ -1991,7 +2052,7 @@ function PendingRequestPanel(props: {
                 }}
                 type="button"
               >
-                Use scan
+                Spend scan
               </button>
               <button
                 className={`${buttonClass("ghost")} flex-1`}
@@ -2000,7 +2061,7 @@ function PendingRequestPanel(props: {
                 }}
                 type="button"
               >
-                Not now
+                Skip
               </button>
             </>
           )}
@@ -2046,7 +2107,7 @@ function PlayerStatusCard(props: {
   player: RoomState["players"]["host"];
 }) {
   const connectionLabel = props.player.connected
-    ? "Live"
+    ? "Here"
     : props.player.hasJoined
       ? "Away"
       : "Waiting";

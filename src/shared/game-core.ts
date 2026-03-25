@@ -231,6 +231,18 @@ function dealHands(state: RoomEngineState, level: number): { host: number[]; gue
   };
 }
 
+function nextRunSeed(state: RoomEngineState, now: number): number {
+  const mixedNow = now >>> 0;
+  const mixedEventId = state.eventId >>> 0;
+  const nextSeed =
+    (state.seed ^
+      Math.imul(mixedNow ^ 0x9e3779b9, 0x85ebca6b) ^
+      Math.imul(mixedEventId ^ 0xc2b2ae35, 0x27d4eb2f)) >>>
+    0;
+
+  return nextSeed === state.seed ? (state.seed + 1) >>> 0 : nextSeed;
+}
+
 function viewerInviteLink(
   roomId: string,
   viewerSeatId: SeatId,
@@ -434,7 +446,7 @@ function clearLevel(state: RoomEngineState, now: number): EngineUpdate {
         summary: {
           kind: "game_won",
           level: state.currentLevel,
-          message: "All 12 levels cleared."
+          message: "All 12 levels down."
         },
         transitionEndsAt: null,
         players: readyFlagsCleared(clonePlayers(state.players))
@@ -469,12 +481,12 @@ function loseGame(state: RoomEngineState, now: number): EngineUpdate {
     state: withStateUpdate(state, now, {
       phase: "lost",
       pendingRequest: null,
-      summary: {
-        kind: "game_lost",
-        level: state.currentLevel,
-        livesRemaining: state.lives,
-        message: "No lives left."
-      },
+        summary: {
+          kind: "game_lost",
+          level: state.currentLevel,
+          livesRemaining: state.lives,
+          message: "Out of lives."
+        },
       transitionEndsAt: null,
       players: readyFlagsCleared(clonePlayers(state.players))
     }),
@@ -544,7 +556,7 @@ export function playLowestCard(state: RoomEngineState, seatId: SeatId, now: numb
           playedCard: playedValue,
           discardedCards: sortedDiscardedCards(discardedCards, null),
           livesRemaining: lives,
-          message: `Life lost. ${playedValue} was played too early.`
+          message: `Life lost. ${playedValue} landed too early.`
         }
       : null;
 
@@ -728,7 +740,7 @@ export function respondScan(
       level: advancedState.currentLevel,
       discardedCards,
       scansRemaining: advancedState.scans - 1,
-      message: "Scan used."
+      message: "Scan spent."
     }
   });
 
@@ -769,7 +781,7 @@ export function requestRematch(state: RoomEngineState, seatId: SeatId, now: numb
 
   const resetState = createRoomEngineState({
     roomId: state.roomId,
-    seed: state.seed,
+    seed: state.debugPreset ? state.seed : nextRunSeed(readyState, now),
     now,
     debugPreset: state.debugPreset
   });

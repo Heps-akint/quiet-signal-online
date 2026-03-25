@@ -5,6 +5,7 @@ import {
   createRoomEngineState,
   levelRewards,
   maybeAdvanceTimedPhase,
+  requestRematch,
   readyForLevel,
   requestPause,
   requestScan,
@@ -131,6 +132,49 @@ describe("game core", () => {
     expect(hostView.players.host.hand).toEqual([11]);
     expect(hostView.players.guest.hand).toEqual([]);
     expect(hostView.inviteLink).toBe("https://example.com/room/room-a#guest-token");
+  });
+
+  it("deals a fresh shuffle on rematch in the same room", () => {
+    let state = createRoomEngineState({
+      roomId: "room-a",
+      seed: 1234,
+      now: 1
+    });
+    state = bootstrapSeat(state, "host", 10);
+    state = bootstrapSeat(state, "guest", 20);
+    state = {
+      ...state,
+      phase: "between_levels"
+    };
+
+    state = readyForLevel(state, "host", 30).state;
+    const firstRun = readyForLevel(state, "guest", 40).state;
+    const firstHands = {
+      host: [...firstRun.players.host.hand],
+      guest: [...firstRun.players.guest.hand]
+    };
+
+    const lostState: RoomEngineState = {
+      ...firstRun,
+      phase: "lost",
+      lives: 0,
+      pendingRequest: null,
+      transitionEndsAt: null
+    };
+
+    const hostRequested = requestRematch(lostState, "host", 50).state;
+    const rematched = requestRematch(hostRequested, "guest", 60).state;
+
+    expect(rematched.phase).toBe("between_levels");
+    expect(rematched.seed).not.toBe(lostState.seed);
+
+    const rematchReadyHost = readyForLevel(rematched, "host", 70).state;
+    const rematchStarted = readyForLevel(rematchReadyHost, "guest", 80).state;
+
+    expect({
+      host: rematchStarted.players.host.hand,
+      guest: rematchStarted.players.guest.hand
+    }).not.toEqual(firstHands);
   });
 });
 

@@ -2,7 +2,7 @@
 
 :root {
   color-scheme: dark;
-  --font-display: "Arial Narrow", "Aptos Narrow", "Bahnschrift", sans-serif;
+  --font-display: "Aptos Display", "Aptos", "Trebuchet MS", sans-serif;
   --font-body: "Aptos", "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --bg-night: #07090d;
   --bg-night-soft: #0b1018;
@@ -123,9 +123,9 @@ button {
 h1,
 h2 {
   font-family: var(--font-display);
-  letter-spacing: 0.025em;
-  line-height: 0.92;
-  text-transform: uppercase;
+  letter-spacing: -0.045em;
+  line-height: 0.94;
+  text-transform: none;
 }
 
 .landing-stage,
@@ -276,8 +276,9 @@ h2 {
 .step-pill {
   border-radius: 999px;
   color: var(--muted-strong);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .landing-stage {
@@ -428,6 +429,7 @@ h2 {
 
 .guide-lead {
   max-width: 34rem;
+  color: var(--muted-strong);
 }
 
 .guide-note {
@@ -545,9 +547,16 @@ h2 {
   max-width: 33ch;
 }
 
+.guide-card-body {
+  font-size: 0.94rem;
+  line-height: 1.72;
+}
+
 .guide-card-foot {
   padding-top: 0.95rem;
   border-top: 1px solid rgba(242, 237, 229, 0.07);
+  font-size: 0.82rem;
+  line-height: 1.65;
 }
 
 .guide-demo {
@@ -1138,7 +1147,7 @@ h2 {
 }
 
 .room-header {
-  padding: 0.8rem 0.9rem 1rem;
+  padding: 1rem 1.05rem 1.05rem;
   border: 1px solid rgba(242, 237, 229, 0.08);
   border-radius: 1.7rem;
   background:
@@ -1184,6 +1193,19 @@ h2 {
   justify-content: flex-end;
 }
 
+.room-progress-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(242, 237, 229, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0) 58%),
+    rgba(20, 25, 37, 0.86);
+  color: var(--muted-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .hud-rail {
   position: relative;
   align-self: start;
@@ -1200,11 +1222,11 @@ h2 {
   justify-content: center;
   gap: 0.4rem;
   border-radius: 999px;
-  padding: 0.72rem 1.08rem;
-  font-size: 0.78rem;
+  padding: 0.74rem 1.08rem;
+  font-size: 0.84rem;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-transform: none;
   overflow: hidden;
   transition:
     transform 180ms var(--ease-premium),
@@ -1692,7 +1714,7 @@ h2 {
   margin-left: 0.35rem;
   font-family: var(--font-display);
   font-size: 1rem;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
 }
 
 .metric-pill-danger .metric-pill-value {
@@ -1784,7 +1806,8 @@ h2 {
 }
 
 .table-controls-note {
-  line-height: 1.8;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
 }
 
 .table-state-note,
@@ -1939,6 +1962,15 @@ h2 {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.025),
     0 28px 76px rgba(0, 0, 0, 0.46);
+}
+
+.room-overlay-actions {
+  position: relative;
+  z-index: 1;
+}
+
+.room-overlay-actions .ui-button {
+  min-width: 10.5rem;
 }
 
 .overlay-panel::before {
@@ -2172,6 +2204,8 @@ h2 {
   position: relative;
   z-index: 1;
   color: var(--muted-strong);
+  max-width: 14rem;
+  line-height: 1.6;
 }
 
 .text-balance {
