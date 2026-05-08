@@ -723,7 +723,7 @@ export function App() {
   }, []);
 
   return (
-    <main className="app-shell grain-overlay min-h-screen px-4 py-6 text-stone-50 sm:px-6 lg:px-8">
+    <main className="app-shell grain-overlay min-h-screen text-stone-50">
       {route.kind === "landing" ? (
         <LandingScreen />
       ) : (
@@ -767,29 +767,56 @@ function LandingScreen() {
     });
   };
 
+  const guideSteps = [
+    {
+      body: "One person opens the room and sends the link. As soon as both of you are in, the room is live.",
+      demo: <InviteFlowDemo reducedMotion={reducedMotion} />,
+      foot: "No sign-in. No code. Just the link.",
+      kicker: "Join",
+      number: "01",
+      title: "Open the room. Send the link."
+    },
+    {
+      body: "When the focus cue lands, stop talking. That shared silence is the mechanic.",
+      demo: <FocusDemo reducedMotion={reducedMotion} />,
+      foot: "Narrating during the round usually makes the timing worse.",
+      kicker: "Focus",
+      number: "02",
+      title: "Get quiet together."
+    },
+    {
+      body: "Your hand is already sorted. Only the lowest number matters, so play that one when it feels right.",
+      demo: <LowestCardDemo reducedMotion={reducedMotion} />,
+      foot: "Clear both hands to finish the level.",
+      kicker: "Play",
+      number: "03",
+      title: "Trust the lowest card."
+    },
+    {
+      body: "If someone jumps the order, you lose a life. If both of you get stuck, spend a scan and burn the lowest card from both hands.",
+      demo: <RiskAndScanDemo reducedMotion={reducedMotion} />,
+      foot: "Scans are limited. Use them before chaos compounds.",
+      kicker: "Recover",
+      number: "04",
+      title: "Use scans before panic."
+    }
+  ] as const;
+
   return (
-    <section className="mx-auto max-w-7xl pb-8">
-      <div className="grid min-h-[calc(100vh-3rem)] w-full items-center gap-8 lg:grid-cols-[1.02fr_0.98fr]">
+    <section className="landing-shell">
+      <section className="landing-hero">
         <motion.div
           {...revealMotion(reducedMotion, {
-            x: -22,
-            y: 20
+            y: 18
           })}
-          className="hero-panel panel-surface rounded-[2.35rem] p-8 sm:p-10 lg:p-12"
+          className="landing-copy"
         >
-          <p className="mb-3 text-sm uppercase tracking-[0.32em] text-[var(--accent-soft)]">Quiet Signal</p>
-          <h1 className="display-face max-w-3xl text-balance text-4xl font-black tracking-tight text-[var(--card-front)] sm:text-6xl">
-            Two people, one pile, no talking once the round starts.
-          </h1>
-          <p className="mt-5 max-w-xl text-balance text-lg leading-8 text-[var(--muted)]">
-            Open a room, send the link, get on a call, then play the cards in order by feel.
+          <p className="landing-kicker">Silent timing game for two players</p>
+          <h1 className="landing-title">Quiet Signal</h1>
+          <p className="landing-subtitle">
+            Open a private room. Send the link. Talk before the cue, then play by timing alone.
           </p>
-          <div className="mt-6 flex flex-wrap gap-2">
-            <div className="hero-note">Works best on a call</div>
-            <div className="hero-note">No sign-in</div>
-            <div className="hero-note">Private link</div>
-          </div>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
+          <div className="landing-actions">
             <button
               className={buttonClass("primary")}
               disabled={busy}
@@ -807,53 +834,146 @@ function LandingScreen() {
             >
               How to play
             </button>
-            <div className="hero-chip rounded-full px-4 py-2 text-sm">
-              2 players. Phone or desktop.
-            </div>
           </div>
-          <div className="mt-10 flex flex-wrap gap-2">
-            <StepPill label="1. Open room" />
-            <StepPill label="2. Send link" />
-            <StepPill label="3. Play quiet" />
+          <div className="landing-meta">
+            <span>Private room</span>
+            <span>2 players</span>
+            <span>12 levels</span>
+            <span>No account</span>
           </div>
-          <HeroGuideCue
-            onClick={scrollToHowToPlay}
-            reducedMotion={reducedMotion}
-          />
-          {error ? (
-            <p className="mt-4 text-sm text-[var(--danger)]">{error}</p>
-          ) : null}
+          <HeroGuideCue onClick={scrollToHowToPlay} reducedMotion={reducedMotion} />
+          {error ? <p className="landing-error">{error}</p> : null}
         </motion.div>
 
         <LandingTablePreview />
-      </div>
-      <HowToPlaySection />
+      </section>
+
+      <HowToPlaySection guideSteps={guideSteps} reducedMotion={reducedMotion} />
     </section>
   );
 }
 
-function StepPill(props: { label: string }) {
+function LandingSignalField(props: { reducedMotion: boolean }) {
   return (
-    <div className="step-pill rounded-full px-4 py-2 text-sm">
-      {props.label}
-    </div>
+    <motion.div
+      {...revealMotion(props.reducedMotion, {
+        delay: 0.08,
+        y: 18
+      })}
+      aria-label="Animated game table preview"
+      className="landing-signal-field"
+    >
+      <div className="landing-table-vignette" />
+      <motion.svg
+        animate={props.reducedMotion ? undefined : { opacity: [0.62, 0.95, 0.62] }}
+        aria-hidden="true"
+        className="landing-route-map"
+        transition={props.reducedMotion ? undefined : {
+          duration: 5.2,
+          ease: "easeInOut",
+          repeat: Number.POSITIVE_INFINITY
+        }}
+        viewBox="0 0 740 620"
+      >
+        <path className="route-line route-line-soft" d="M116 486 C248 358 301 329 370 310 C447 289 504 251 624 128" />
+        <motion.path
+          animate={props.reducedMotion ? undefined : { pathLength: [0.12, 1, 0.12] }}
+          className="route-line route-line-active"
+          d="M116 486 C248 358 301 329 370 310 C447 289 504 251 624 128"
+          initial={props.reducedMotion ? undefined : { pathLength: 0.12 }}
+          transition={props.reducedMotion ? undefined : {
+            duration: 4,
+            ease: "easeInOut",
+            repeat: Number.POSITIVE_INFINITY
+          }}
+        />
+        <path className="route-line route-line-soft" d="M120 142 C238 221 310 264 370 310 C441 364 517 404 634 486" />
+        <motion.path
+          animate={props.reducedMotion ? undefined : { pathLength: [1, 0.18, 1] }}
+          className="route-line route-line-warm"
+          d="M120 142 C238 221 310 264 370 310 C441 364 517 404 634 486"
+          initial={props.reducedMotion ? undefined : { pathLength: 1 }}
+          transition={props.reducedMotion ? undefined : {
+            duration: 4.8,
+            ease: "easeInOut",
+            repeat: Number.POSITIVE_INFINITY
+          }}
+        />
+      </motion.svg>
+
+      <div className="landing-table-node landing-table-node-host">
+        <p className="landing-status-label">You</p>
+        <div className="landing-live-hand" aria-hidden="true">
+          <span className="landing-face-card landing-live-card-live">31</span>
+          <span className="landing-face-card landing-live-card-muted">77</span>
+        </div>
+      </div>
+
+      <div className="landing-table-node landing-table-node-guest">
+        <p className="landing-status-label">Partner</p>
+        <div className="landing-status-stack" aria-hidden="true">
+          <span className="landing-card-back" />
+          <span className="landing-card-back" />
+          <span className="landing-card-back" />
+        </div>
+      </div>
+
+      <div className="landing-orbit-zone">
+        <motion.div
+          animate={props.reducedMotion ? undefined : { rotate: 360 }}
+          className="landing-orbit"
+          transition={props.reducedMotion ? undefined : {
+            duration: 18,
+            ease: "linear",
+            repeat: Number.POSITIVE_INFINITY
+          }}
+        >
+          <span className="landing-orbit-card orbit-card-1">08</span>
+          <span className="landing-orbit-card orbit-card-2">64</span>
+          <span className="landing-orbit-card orbit-card-3">95</span>
+        </motion.div>
+        <motion.div
+          animate={props.reducedMotion ? undefined : { scale: [0.9, 1.06, 0.9], opacity: [0.24, 0.62, 0.24] }}
+          className="landing-pulse-ring landing-pulse-ring-a"
+          transition={props.reducedMotion ? undefined : {
+            duration: 3.8,
+            ease: "easeInOut",
+            repeat: Number.POSITIVE_INFINITY
+          }}
+        />
+        <motion.div
+          animate={props.reducedMotion ? undefined : { scale: [1.04, 0.92, 1.04], opacity: [0.16, 0.34, 0.16] }}
+          className="landing-pulse-ring landing-pulse-ring-b"
+          transition={props.reducedMotion ? undefined : {
+            duration: 5.4,
+            ease: "easeInOut",
+            repeat: Number.POSITIVE_INFINITY
+          }}
+        />
+        <div className="landing-table-core">
+          <p className="landing-table-kicker">Shared pile</p>
+          <div className="landing-pile">
+            <span className="landing-face-card landing-face-card-tilt-left">18</span>
+            <span className="landing-face-card landing-face-card-tilt-right">42</span>
+          </div>
+          <p className="landing-table-copy">Lowest safe number wins the moment.</p>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
 function HeroGuideCue(props: { reducedMotion: boolean; onClick: () => void }) {
   return (
     <button
-      className="hero-guide-cue mt-8 w-full rounded-[1.35rem] px-4 py-4 text-left sm:px-5"
+      className="hero-guide-cue"
       onClick={props.onClick}
       type="button"
     >
-      <div className="hero-guide-cue-copy">
-        <p className="hero-guide-cue-kicker">Never played?</p>
-        <p className="hero-guide-cue-title">Read the 30-second rules</p>
-        <p className="hero-guide-cue-body">See the round flow before you open a room.</p>
-      </div>
+      <span className="hero-guide-cue-kicker">New here?</span>
+      <span className="hero-guide-cue-title">Read the 30-second rules</span>
       <motion.span
-        animate={props.reducedMotion ? undefined : { y: [0, 5, 0] }}
+        animate={props.reducedMotion ? undefined : { x: [0, 4, 0] }}
         aria-hidden="true"
         className="hero-guide-cue-arrow"
         transition={props.reducedMotion ? undefined : {
@@ -862,7 +982,7 @@ function HeroGuideCue(props: { reducedMotion: boolean; onClick: () => void }) {
           repeat: Number.POSITIVE_INFINITY
         }}
       >
-        ↓
+        &gt;
       </motion.span>
     </button>
   );
@@ -871,136 +991,57 @@ function HeroGuideCue(props: { reducedMotion: boolean; onClick: () => void }) {
 function LandingTablePreview() {
   const reducedMotion = Boolean(useReducedMotion());
 
-  return (
-    <motion.aside
-      {...revealMotion(reducedMotion, {
-        delay: 0.08,
-        x: 24,
-        y: 20
-      })}
-      className="landing-stage relative overflow-hidden rounded-[2.35rem] p-6 sm:p-8"
-    >
-      <div className="landing-stage-stars absolute inset-0" />
-      <div className="relative flex h-full min-h-[28rem] flex-col gap-5">
-        <div className="landing-rail flex items-center justify-between rounded-[1.5rem] px-4 py-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-[var(--accent-soft)]">Partner</p>
-            <p className="mt-2 text-lg font-semibold text-[var(--card-front)]">Partner hand</p>
-          </div>
-          <div className="flex gap-2">
-            <div className="landing-card-back h-[3.9rem] w-11 rounded-[0.95rem]" />
-            <div className="landing-card-back h-[3.9rem] w-11 rounded-[0.95rem]" />
-            <div className="landing-card-back h-[3.9rem] w-11 rounded-[0.95rem]" />
-          </div>
-        </div>
-
-        <div className="flex flex-1 items-center justify-center">
-          <div className="shared-pile-stage w-full max-w-sm px-5 py-8 text-center">
-            <p className="text-xs uppercase tracking-[0.3em] text-[var(--accent-soft)]">Shared pile</p>
-            <div className="mt-5 flex justify-center gap-3">
-              <div className="landing-face-card rotate-[-4deg]">18</div>
-              <div className="landing-face-card rotate-[3deg]">42</div>
-            </div>
-            <p className="mt-5 text-sm leading-7 text-[var(--muted)]">
-              The smallest number that fits goes down next.
-            </p>
-          </div>
-        </div>
-
-        <div className="live-hand-zone rounded-[1.8rem] p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-[var(--accent-soft)]">Your hand</p>
-              <p className="mt-2 text-base text-[var(--muted)]">Only the lowest card is live.</p>
-            </div>
-            <div className="count-pill rounded-full px-3 py-1 text-sm">3 cards</div>
-          </div>
-          <div className="mt-5 flex items-end gap-3">
-            <div className="landing-face-card h-28 w-20 text-3xl opacity-60">23</div>
-            <div className="landing-face-card landing-face-card-featured h-32 w-24 text-4xl">31</div>
-            <div className="landing-muted-card h-28 w-20 text-3xl">77</div>
-          </div>
-        </div>
-      </div>
-    </motion.aside>
-  );
+  return <LandingSignalField reducedMotion={reducedMotion} />;
 }
 
-function HowToPlaySection() {
-  const reducedMotion = Boolean(useReducedMotion());
-
+function HowToPlaySection(props: {
+  guideSteps: ReadonlyArray<{
+    body: string;
+    demo: ReactNode;
+    foot: string;
+    kicker: string;
+    number: string;
+    title: string;
+  }>;
+  reducedMotion: boolean;
+}) {
   return (
     <motion.section
-      {...revealMotion(reducedMotion, {
+      {...revealMotion(props.reducedMotion, {
         delay: 0.12,
         duration: 0.6,
         y: 24
       })}
+      className="rules-section"
       id="how-to-play"
-      className="how-to-panel panel-surface mt-4 rounded-[2.35rem] p-6 sm:p-8 lg:p-10"
     >
-      <div className="grid gap-8 lg:grid-cols-[0.84fr_1.16fr] lg:gap-10">
-        <div className="guide-intro">
-          <p className="guide-kicker">How to play</p>
-          <h2 className="display-face mt-3 max-w-xl text-balance text-3xl font-black text-[var(--card-front)] sm:text-5xl">
-            Say what you need to say before the cue.
-          </h2>
-          <p className="guide-lead mt-5 max-w-lg text-balance text-base leading-8 text-[var(--muted)] sm:text-lg">
-            Both hands are already sorted. When the focus cue shows up, stop talking. From there, you
-            and your partner play by timing alone.
-          </p>
-          <div className="mt-6 space-y-3">
-            <div className="guide-note">
-              <span className="guide-note-mark" />
-              <span>Talk before the cue. Not during the round.</span>
-            </div>
-            <div className="guide-note">
-              <span className="guide-note-mark" />
-              <span>If someone jumps the order, the room loses a life.</span>
-            </div>
-            <div className="guide-note">
-              <span className="guide-note-mark" />
-              <span>If both of you feel stuck, spend a scan.</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <GuideCard
-            body="One player opens the room and sends the invite. As soon as both of you arrive, the level is ready."
-            demo={<InviteFlowDemo reducedMotion={reducedMotion} />}
-            foot="No accounts. No code to type."
-            kicker="1. Join"
-            title="Open the room. Send the link."
-          />
-          <GuideCard
-            body="The focus cue gives both players the same clean start. After that, stop narrating and trust the timing."
-            demo={<FocusDemo reducedMotion={reducedMotion} />}
-            foot="Talking through the round usually makes it worse."
-            kicker="2. Focus"
-            title="Hear the cue, then go quiet."
-          />
-          <GuideCard
-            body="Your hand is sorted already. Watch the smallest card you still have and drop it when it feels next."
-            demo={<LowestCardDemo reducedMotion={reducedMotion} />}
-            foot="Clear both hands to finish the level."
-            kicker="3. Play"
-            title="Only your lowest card matters."
-          />
-          <GuideCard
-            body="If a smaller hidden card should have landed first, you lose a life. When the table feels jammed, spend a scan to burn the lowest card from both hands."
-            demo={<RiskAndScanDemo reducedMotion={reducedMotion} />}
-            foot="Scans are limited, so save them for real doubt."
-            kicker="4. Recover"
-            title="Use scans before panic takes over."
-          />
-        </div>
+      <div className="rules-heading">
+        <p className="rules-kicker">How the round works</p>
+        <h2 className="rules-title">The whole game is one clean loop.</h2>
+        <p className="rules-lead">
+          Start together, stay quiet, play the smallest card when the timing feels right.
+        </p>
       </div>
 
-      <div className="guide-rule-strip mt-8 flex flex-wrap gap-2">
-        <div className="guide-rule-chip">Clear both hands to move on.</div>
-        <div className="guide-rule-chip">Beat level 12 to finish the run.</div>
-        <div className="guide-rule-chip">Being on a call helps. Talking through the round does not.</div>
+      <div className="rules-timeline">
+        {props.guideSteps.map((step, index) => (
+          <GuideCard
+            body={step.body}
+            demo={step.demo}
+            foot={step.foot}
+            key={step.number}
+            kicker={`${step.number} ${step.kicker}`}
+            reducedMotion={props.reducedMotion}
+            title={step.title}
+            x={index % 2 === 0 ? -14 : 14}
+          />
+        ))}
+      </div>
+
+      <div className="rules-summary">
+        <span>Clear both hands to move on.</span>
+        <span>Beat level 12 to finish the run.</span>
+        <span>Silence is the mechanic.</span>
       </div>
     </motion.section>
   );
@@ -1012,19 +1053,30 @@ function GuideCard(props: {
   body: string;
   foot: string;
   demo: ReactNode;
+  reducedMotion: boolean;
+  x: number;
 }) {
   return (
-    <article className="guide-card rounded-[1.6rem] p-4 sm:p-5">
-      <div className="guide-demo-stage rounded-[1.35rem] p-4">
-        {props.demo}
+    <motion.article
+      {...revealMotion(props.reducedMotion, {
+        duration: 0.54,
+        x: props.x,
+        y: 18
+      })}
+      className="guide-card"
+    >
+      <div className="guide-card-inner">
+        <div className="guide-card-index">{props.kicker}</div>
+        <div className="guide-card-copy">
+          <h3>{props.title}</h3>
+          <p>{props.body}</p>
+          <p className="guide-card-foot">{props.foot}</p>
+        </div>
+        <div className="guide-demo-stage">
+          {props.demo}
+        </div>
       </div>
-      <div className="mt-5">
-        <p className="guide-card-kicker">{props.kicker}</p>
-        <h3 className="mt-3 text-balance text-xl font-semibold text-[var(--card-front)]">{props.title}</h3>
-        <p className="guide-card-body mt-3 text-sm leading-7 text-[var(--muted)]">{props.body}</p>
-        <p className="guide-card-foot mt-4 text-sm text-[var(--muted-strong)]">{props.foot}</p>
-      </div>
-    </article>
+    </motion.article>
   );
 }
 
@@ -1217,18 +1269,18 @@ function CenteredMessage(props: { title: string; body: string; action?: ReactNod
   const reducedMotion = Boolean(useReducedMotion());
 
   return (
-    <section className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-3xl items-center justify-center">
+    <section className="message-shell mx-auto flex min-h-[calc(100vh-3rem)] max-w-3xl items-center justify-center">
       <motion.div
         {...revealMotion(reducedMotion, {
           duration: 0.48,
           y: 16
         })}
-        className="panel-surface rounded-[1.8rem] p-8 text-center"
+        className="message-panel panel-surface rounded-[1.8rem] p-8 text-center"
       >
-        <p className="text-xs uppercase tracking-[0.34em] text-[var(--accent-soft)]">Room</p>
-        <h1 className="mx-auto mt-3 max-w-[20rem] text-balance text-3xl font-black text-[var(--card-front)]">{props.title}</h1>
-        <p className="mx-auto mt-4 max-w-[24rem] text-balance text-sm leading-7 text-[var(--muted)]">{props.body}</p>
-        {props.action ? <div className="mt-6">{props.action}</div> : null}
+        <p className="message-kicker text-xs uppercase tracking-[0.34em] text-[var(--accent-soft)]">Room</p>
+        <h1 className="message-title mx-auto mt-3 max-w-[20rem] text-balance text-3xl font-black text-[var(--card-front)]">{props.title}</h1>
+        <p className="message-body mx-auto mt-4 max-w-[24rem] text-balance text-sm leading-7 text-[var(--muted)]">{props.body}</p>
+        {props.action ? <div className="message-actions mt-6">{props.action}</div> : null}
       </motion.div>
     </section>
   );
@@ -1345,7 +1397,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
   };
 
   return (
-    <section className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col gap-5 relative">
+    <section className="room-shell flex min-h-[calc(100vh-3rem)] flex-col gap-5 relative">
       <motion.header
         {...revealMotion(reducedMotion, {
           duration: 0.5,
@@ -1358,7 +1410,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
         )}
       >
         <div className="room-title-block">
-          <p className="text-xs uppercase tracking-[0.34em] text-[var(--accent-soft)]">
+          <p className="room-brandline text-xs uppercase tracking-[0.34em] text-[var(--accent-soft)]">
             Room {snapshot.roomId}
           </p>
           <div className="room-level-row mt-2 flex flex-wrap items-end gap-3">
@@ -1366,7 +1418,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
               Level {snapshot.currentLevel}
             </h1>
             <div className="room-progress-pill rounded-full px-3 py-1 text-sm">
-              of {snapshot.maxLevel}
+              {snapshot.maxLevel} level run
             </div>
           </div>
         </div>
@@ -1417,7 +1469,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
         ) : null}
       </AnimatePresence>
 
-      <div className="grid flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_17.5rem]">
+      <div className="room-layout grid flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_17.5rem]">
         <motion.div
           {...revealMotion(reducedMotion, {
             delay: 0.05,
@@ -1442,9 +1494,10 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
               >
                 <div className="mb-4 flex flex-wrap items-center gap-3 sm:grid sm:grid-cols-[auto_1fr_auto] sm:gap-4">
                   <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
+                    <p className="room-section-kicker text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
                       Shared pile
                     </p>
+                    <h2 className="table-title">Table center</h2>
                   </div>
                   <div className="table-toolbar flex flex-wrap items-center gap-2 sm:justify-center">
                     <div className="table-phase-badge rounded-full px-3 py-2 text-xs uppercase tracking-[0.22em]">
@@ -1494,7 +1547,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
                   <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
                     Your hand
                   </p>
-                  <p className="mt-2 text-sm text-[var(--muted)]">Only your lowest card is live.</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">Lowest card is the only legal play.</p>
                 </div>
                 <div className="count-pill rounded-full px-3 py-1 text-sm">
                   {countLabel(self.handCount, "card")}
@@ -1711,7 +1764,7 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
               </div>
             </dl>
             <div className="table-controls-note table-state-note mt-4 rounded-[1rem] px-3 py-3 text-sm leading-7 text-[var(--muted)]">
-              Space play. P pause. S scan. F fullscreen.
+              Pause slows the room. Scan burns the lowest card from both hands.
             </div>
           </div>
         </motion.aside>
