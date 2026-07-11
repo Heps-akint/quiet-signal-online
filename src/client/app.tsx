@@ -1,15 +1,6 @@
-import {
-  AnimatePresence,
-  motion,
-  useReducedMotion
-} from "motion/react";
-import {
-  startTransition,
-  useEffect,
-  useRef,
-  useState
-} from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { startTransition, useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import {
   bootstrapResponseSchema,
   clientEventSchema,
@@ -21,24 +12,25 @@ import {
   type SeatId
 } from "@shared/protocol";
 import {
-  type BannerCelebration,
   type BannerTone,
   type ConnectionState,
   useRoomStore
 } from "@client/store";
 import { useRoomCardSounds } from "@client/card-sound";
+import { APP_VERSION, PROTOCOL_VERSION } from "@shared/version";
 
 type RouteState =
-  | {
-      kind: "landing";
-    }
-  | {
-      kind: "room";
-      roomId: string;
-      token: string | null;
-    };
+  | { kind: "landing" }
+  | { kind: "room"; roomId: string; token: string | null };
 
-const ROOM_TOKEN_STORAGE_PREFIX = "quiet-signal:room-token:";
+const ROOM_TOKEN_STORAGE_PREFIX = "the-mind:room-token:";
+const revealEase = [0.22, 1, 0.36, 1] as const;
+const layoutSpring = {
+  damping: 30,
+  mass: 0.82,
+  stiffness: 320,
+  type: "spring"
+} as const;
 
 function roomTokenStorageKey(roomId: string): string {
   return `${ROOM_TOKEN_STORAGE_PREFIX}${roomId}`;
@@ -56,7 +48,7 @@ function persistRoomToken(roomId: string, token: string): void {
   try {
     window.sessionStorage.setItem(roomTokenStorageKey(roomId), token);
   } catch {
-    // Ignore storage failures in private browsing modes.
+    // Private browsing can block storage. The live URL still carries the token.
   }
 }
 
@@ -64,23 +56,19 @@ function clearStoredRoomToken(roomId: string): void {
   try {
     window.sessionStorage.removeItem(roomTokenStorageKey(roomId));
   } catch {
-    // Ignore storage failures in private browsing modes.
+    // Nothing else to clear.
   }
 }
 
 function parseRoute(url: URL): RouteState {
   const match = /^\/room\/([a-z0-9]+)$/u.exec(url.pathname);
   if (!match) {
-    return {
-      kind: "landing"
-    };
+    return { kind: "landing" };
   }
 
   const roomId = roomIdSchema.safeParse(match[1] ?? "");
   if (!roomId.success) {
-    return {
-      kind: "landing"
-    };
+    return { kind: "landing" };
   }
 
   return {
@@ -93,10 +81,7 @@ function parseRoute(url: URL): RouteState {
 function selfAndOther(snapshot: RoomState) {
   const self = snapshot.players[snapshot.viewerSeatId];
   const otherSeatId: SeatId = snapshot.viewerSeatId === "host" ? "guest" : "host";
-  return {
-    self,
-    other: snapshot.players[otherSeatId]
-  };
+  return { other: snapshot.players[otherSeatId], self };
 }
 
 function classes(...values: Array<string | false | null | undefined>): string {
@@ -111,8 +96,13 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function isImmersivePhase(phase: RoomState["phase"]): boolean {
-  return phase === "focus_transition" || phase === "in_round" || phase === "paused";
+function buttonClass(kind: "primary" | "secondary" | "text"): string {
+  return classes(
+    "ui-button",
+    kind === "primary" && "ui-button-primary",
+    kind === "secondary" && "ui-button-secondary",
+    kind === "text" && "ui-button-text"
+  );
 }
 
 function describeConnectionState(state: ConnectionState): string {
@@ -126,448 +116,67 @@ function describeConnectionState(state: ConnectionState): string {
     case "closed":
       return "Reconnecting";
     case "error":
-      return "Trouble";
+      return "Connection lost";
     case "idle":
       return "Waiting";
   }
-}
-
-function buttonClass(kind: "primary" | "secondary" | "ghost"): string {
-  const base = "ui-button";
-  if (kind === "primary") {
-    return `${base} ui-button-primary`;
-  }
-  if (kind === "secondary") {
-    return `${base} ui-button-secondary`;
-  }
-  return `${base} ui-button-ghost`;
-}
-
-function bannerToneLabel(tone: BannerTone): string {
-  switch (tone) {
-    case "success":
-      return "Good";
-    case "warning":
-      return "Heads up";
-    case "danger":
-      return "Alert";
-    case "neutral":
-      return "Update";
-  }
-}
-
-function bannerClass(tone: BannerTone): string {
-  return classes(
-    "banner-pill",
-    tone === "neutral" && "banner-pill-neutral",
-    tone === "success" && "banner-pill-success",
-    tone === "warning" && "banner-pill-warning",
-    tone === "danger" && "banner-pill-danger"
-  );
-}
-
-function describeTablePhase(phase: RoomState["phase"], focusRemainingMs: number): string {
-  if (phase === "focus_transition") {
-    return focusRemainingMs === 0 ? "live" : "focus";
-  }
-
-  switch (phase) {
-    case "waiting":
-      return "waiting";
-    case "between_levels":
-      return "next level";
-    case "in_round":
-      return "live";
-    case "paused":
-      return "paused";
-    case "won":
-      return "complete";
-    case "lost":
-      return "over";
-  }
-}
-
-function describeLevelRewards(rewards: { life: boolean; scan: boolean }): string {
-  const labels: string[] = [];
-
-  if (rewards.life) {
-    labels.push("+1 life");
-  }
-  if (rewards.scan) {
-    labels.push("+1 scan");
-  }
-
-  return labels.join(" and ");
 }
 
 function describePlayerPresence(player: RoomState["players"]["host"]): string {
   if (player.connected) {
     return "Here";
   }
-
   if (player.hasJoined) {
-    return "Coming back";
+    return "Away";
   }
-
-  return "Not here yet";
+  return "Waiting";
 }
 
-function waitingOverlayBody(snapshot: RoomState): string {
-  if (snapshot.inviteLink) {
-    return "Send the invite link. The room opens as soon as your partner opens it.";
+function describeTablePhase(phase: RoomState["phase"], focusRemainingMs: number): string {
+  if (phase === "focus_transition") {
+    return focusRemainingMs > 0 ? "Focus" : "Live";
   }
 
-  return "Waiting for both players to get into the room.";
-}
-
-function betweenLevelsBody(snapshot: RoomState): string {
-  if (snapshot.summary?.kind === "level_cleared") {
-    const rewards = describeLevelRewards(snapshot.summary.rewards);
-    return rewards
-      ? `${snapshot.summary.message} ${rewards}. Hit ready when you both want the next hand.`
-      : `${snapshot.summary.message} Hit ready when you both want the next hand.`;
-  }
-
-  return "Hit ready when you both want the next hand.";
-}
-
-function emptyPileBody(phase: RoomState["phase"]): string {
   switch (phase) {
     case "waiting":
+      return "Waiting";
     case "between_levels":
-      return "Cards land here once the round starts.";
-    case "focus_transition":
+      return "Ready";
     case "in_round":
+      return "Live";
     case "paused":
-      return "Nothing on the pile yet.";
+      return "Paused";
     case "won":
+      return "Complete";
     case "lost":
-      return "Round finished.";
+      return "Run lost";
   }
 }
 
-function emptyHandBody(phase: RoomState["phase"]): string {
-  switch (phase) {
-    case "waiting":
-    case "between_levels":
-      return "Your cards show up here when the level starts.";
-    case "focus_transition":
-      return "Hold for the cue.";
-    case "in_round":
-    case "paused":
-      return "Hand clear.";
-    case "won":
-    case "lost":
-      return "No cards left in hand.";
+function isRoundLive(snapshot: RoomState, nowMs: number): boolean {
+  return snapshot.phase === "in_round"
+    || (
+      snapshot.phase === "focus_transition"
+      && snapshot.transitionEndsAt !== null
+      && nowMs >= snapshot.transitionEndsAt
+    );
+}
+
+function bannerToneLabel(tone: BannerTone): string {
+  switch (tone) {
+    case "success":
+      return "Clear";
+    case "warning":
+      return "Check";
+    case "danger":
+      return "Life lost";
+    case "neutral":
+      return "Update";
   }
-}
-
-type BannerBurstPiece = {
-  color: string;
-  delayMs: number;
-  durationMs: number;
-  height: string;
-  originX: string;
-  originY: string;
-  radius: string;
-  rotate: string;
-  width: string;
-  x: string;
-  y: string;
-};
-
-const levelClearBurst: BannerBurstPiece[] = [
-  {
-    color: "var(--accent)",
-    delayMs: 0,
-    durationMs: 980,
-    height: "0.9rem",
-    originX: "48%",
-    originY: "52%",
-    radius: "999px",
-    rotate: "-48deg",
-    width: "0.9rem",
-    x: "-7.6rem",
-    y: "-3.1rem"
-  },
-  {
-    color: "var(--card-front)",
-    delayMs: 30,
-    durationMs: 920,
-    height: "0.34rem",
-    originX: "49%",
-    originY: "50%",
-    radius: "999px",
-    rotate: "26deg",
-    width: "0.34rem",
-    x: "-5.8rem",
-    y: "-4.3rem"
-  },
-  {
-    color: "var(--signal)",
-    delayMs: 20,
-    durationMs: 1040,
-    height: "1rem",
-    originX: "50%",
-    originY: "51%",
-    radius: "999px",
-    rotate: "34deg",
-    width: "0.26rem",
-    x: "-2.7rem",
-    y: "-4.9rem"
-  },
-  {
-    color: "var(--accent-soft)",
-    delayMs: 50,
-    durationMs: 1080,
-    height: "0.92rem",
-    originX: "50%",
-    originY: "52%",
-    radius: "0.16rem",
-    rotate: "-12deg",
-    width: "0.28rem",
-    x: "-0.8rem",
-    y: "-5.7rem"
-  },
-  {
-    color: "var(--signal-soft)",
-    delayMs: 0,
-    durationMs: 1100,
-    height: "0.4rem",
-    originX: "51%",
-    originY: "51%",
-    radius: "999px",
-    rotate: "48deg",
-    width: "0.4rem",
-    x: "2.4rem",
-    y: "-5rem"
-  },
-  {
-    color: "var(--accent)",
-    delayMs: 60,
-    durationMs: 1020,
-    height: "0.98rem",
-    originX: "50%",
-    originY: "52%",
-    radius: "0.18rem",
-    rotate: "52deg",
-    width: "0.28rem",
-    x: "5.6rem",
-    y: "-3.7rem"
-  },
-  {
-    color: "var(--card-front)",
-    delayMs: 35,
-    durationMs: 980,
-    height: "0.34rem",
-    originX: "52%",
-    originY: "51%",
-    radius: "999px",
-    rotate: "-18deg",
-    width: "0.34rem",
-    x: "7.5rem",
-    y: "-2.2rem"
-  },
-  {
-    color: "var(--signal)",
-    delayMs: 15,
-    durationMs: 960,
-    height: "0.96rem",
-    originX: "48%",
-    originY: "53%",
-    radius: "0.16rem",
-    rotate: "-68deg",
-    width: "0.26rem",
-    x: "-6.8rem",
-    y: "1.9rem"
-  },
-  {
-    color: "var(--accent-soft)",
-    delayMs: 45,
-    durationMs: 990,
-    height: "0.3rem",
-    originX: "49%",
-    originY: "54%",
-    radius: "999px",
-    rotate: "20deg",
-    width: "0.3rem",
-    x: "-3.7rem",
-    y: "3rem"
-  },
-  {
-    color: "var(--signal-soft)",
-    delayMs: 20,
-    durationMs: 1040,
-    height: "0.96rem",
-    originX: "51%",
-    originY: "54%",
-    radius: "0.16rem",
-    rotate: "22deg",
-    width: "0.26rem",
-    x: "0.6rem",
-    y: "3.4rem"
-  },
-  {
-    color: "var(--card-front)",
-    delayMs: 55,
-    durationMs: 1060,
-    height: "0.34rem",
-    originX: "52%",
-    originY: "53%",
-    radius: "999px",
-    rotate: "-32deg",
-    width: "0.34rem",
-    x: "4.8rem",
-    y: "2.6rem"
-  },
-  {
-    color: "var(--accent)",
-    delayMs: 25,
-    durationMs: 1080,
-    height: "0.92rem",
-    originX: "51%",
-    originY: "52%",
-    radius: "0.18rem",
-    rotate: "68deg",
-    width: "0.28rem",
-    x: "7.2rem",
-    y: "1.3rem"
-  }
-];
-
-const runCompleteBurst: BannerBurstPiece[] = [
-  ...levelClearBurst,
-  {
-    color: "var(--accent)",
-    delayMs: 85,
-    durationMs: 1160,
-    height: "1.04rem",
-    originX: "50%",
-    originY: "50%",
-    radius: "0.16rem",
-    rotate: "-82deg",
-    width: "0.28rem",
-    x: "-9rem",
-    y: "-0.8rem"
-  },
-  {
-    color: "var(--signal-soft)",
-    delayMs: 75,
-    durationMs: 1180,
-    height: "0.44rem",
-    originX: "50%",
-    originY: "50%",
-    radius: "999px",
-    rotate: "10deg",
-    width: "0.44rem",
-    x: "0.2rem",
-    y: "-6.4rem"
-  },
-  {
-    color: "var(--card-front)",
-    delayMs: 95,
-    durationMs: 1150,
-    height: "0.98rem",
-    originX: "50%",
-    originY: "50%",
-    radius: "0.16rem",
-    rotate: "84deg",
-    width: "0.28rem",
-    x: "8.8rem",
-    y: "-1.1rem"
-  },
-  {
-    color: "var(--signal)",
-    delayMs: 70,
-    durationMs: 1120,
-    height: "0.98rem",
-    originX: "50%",
-    originY: "52%",
-    radius: "999px",
-    rotate: "-12deg",
-    width: "0.34rem",
-    x: "-0.3rem",
-    y: "4.1rem"
-  }
-];
-
-function BannerCelebrationBurst(props: {
-  kind: Exclude<BannerCelebration, null>;
-  reducedMotion: boolean;
-}) {
-  if (props.reducedMotion) {
-    return null;
-  }
-
-  const pieces = props.kind === "run_complete" ? runCompleteBurst : levelClearBurst;
-
-  return (
-    <span
-      aria-hidden="true"
-      className={classes(
-        "banner-confetti",
-        props.kind === "run_complete" && "banner-confetti-grand"
-      )}
-    >
-      {pieces.map((piece, index) => {
-        const style = {
-          "--particle-color": piece.color,
-          "--particle-delay": `${piece.delayMs}ms`,
-          "--particle-duration": `${piece.durationMs}ms`,
-          "--particle-height": piece.height,
-          "--particle-origin-x": piece.originX,
-          "--particle-origin-y": piece.originY,
-          "--particle-radius": piece.radius,
-          "--particle-rotate": piece.rotate,
-          "--particle-width": piece.width,
-          "--particle-x": piece.x,
-          "--particle-y": piece.y
-        } as CSSProperties;
-
-        return <span className="banner-confetti-piece" key={`${props.kind}-${index}`} style={style} />;
-      })}
-    </span>
-  );
-}
-
-function connectionPillClass(state: ConnectionState): string {
-  return classes(
-    "status-pill rounded-full px-3 py-2 text-sm font-semibold capitalize",
-    state === "open" && "status-pill-open",
-    state === "error" && "status-pill-error"
-  );
-}
-
-function statPillClass(tone: "danger" | "warning"): string {
-  return classes(
-    "metric-pill rounded-full px-3 py-2 text-sm",
-    tone === "danger" && "metric-pill-danger",
-    tone === "warning" && "metric-pill-warning"
-  );
-}
-
-function updateLiveCardPointer(event: ReactPointerEvent<HTMLElement>): void {
-  const bounds = event.currentTarget.getBoundingClientRect();
-  const x = (event.clientX - bounds.left) / bounds.width;
-  const y = (event.clientY - bounds.top) / bounds.height;
-  const rotateY = (x - 0.5) * 12;
-  const rotateX = (0.5 - y) * 14;
-
-  event.currentTarget.style.setProperty("--signal-card-rotate-x", `${rotateX.toFixed(2)}deg`);
-  event.currentTarget.style.setProperty("--signal-card-rotate-y", `${rotateY.toFixed(2)}deg`);
-  event.currentTarget.style.setProperty("--signal-card-glow-x", `${(x * 100).toFixed(1)}%`);
-  event.currentTarget.style.setProperty("--signal-card-glow-y", `${(y * 100).toFixed(1)}%`);
-}
-
-function resetLiveCardPointer(event: ReactPointerEvent<HTMLElement>): void {
-  event.currentTarget.style.removeProperty("--signal-card-rotate-x");
-  event.currentTarget.style.removeProperty("--signal-card-rotate-y");
-  event.currentTarget.style.removeProperty("--signal-card-glow-x");
-  event.currentTarget.style.removeProperty("--signal-card-glow-y");
 }
 
 function useHandFanLayout(measureRef: RefObject<HTMLDivElement | null>, cardCount: number) {
-  const [availableWidth, setAvailableWidth] = useState(640);
+  const [availableSize, setAvailableSize] = useState({ height: 180, width: 640 });
 
   useEffect(() => {
     const element = measureRef.current;
@@ -575,103 +184,56 @@ function useHandFanLayout(measureRef: RefObject<HTMLDivElement | null>, cardCoun
       return undefined;
     }
 
-    const updateWidth = () => {
-      setAvailableWidth(element.getBoundingClientRect().width);
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect();
+      setAvailableSize({ height: rect.height, width: rect.width });
     };
+    updateSize();
 
-    updateWidth();
-
-    const observer = new ResizeObserver(() => {
-      updateWidth();
-    });
+    const observer = new ResizeObserver(updateSize);
     observer.observe(element);
-
-    return () => {
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, [measureRef]);
 
-  const compact = availableWidth < 560;
-  const usableWidth = Math.max(availableWidth - (compact ? 10 : 16), 0);
-  const maxCardWidth = compact ? 96 : 104;
-  const minCardWidth = compact ? 60 : 68;
-  const preferredVisibleStep = compact ? 20 : 26;
-  const relaxedGap = compact ? 10 : 14;
+  const compact = availableSize.width < 560;
+  const usableWidth = Math.max(availableSize.width - (compact ? 8 : 16), 0);
+  const baseMaxCardWidth = compact ? 112 : 132;
+  const heightLimitedCardWidth = Math.floor(Math.max(44, (availableSize.height - 16) / 1.4));
+  const maxCardWidth = Math.max(44, Math.min(baseMaxCardWidth, heightLimitedCardWidth));
+  const minCardWidth = Math.min(compact ? 62 : 72, maxCardWidth);
+  const preferredVisibleStep = compact ? 25 : 36;
+  const relaxedGap = compact ? 8 : 14;
   const overlapCount = Math.max(cardCount - 1, 0);
-  const cardWidth =
-    cardCount <= 1
-      ? maxCardWidth
-      : clampNumber(
-          Math.round(usableWidth - preferredVisibleStep * overlapCount),
-          minCardWidth,
-          maxCardWidth
-        );
-  const fittedStep =
-    cardCount <= 1
-      ? cardWidth
-      : Math.max(0, Math.min(cardWidth + relaxedGap, (usableWidth - cardWidth) / overlapCount));
-  const cardHeight = Math.round(cardWidth * (compact ? 1.34 : 1.38));
-  const totalWidth = cardCount === 0 ? 0 : cardWidth + fittedStep * overlapCount;
+  const cardWidth = cardCount <= 1
+    ? maxCardWidth
+    : clampNumber(
+        Math.round(usableWidth - preferredVisibleStep * overlapCount),
+        minCardWidth,
+        maxCardWidth
+      );
+  const step = cardCount <= 1
+    ? cardWidth
+    : Math.max(0, Math.min(cardWidth + relaxedGap, (usableWidth - cardWidth) / overlapCount));
+  const cardHeight = Math.round(cardWidth * 1.4);
+  const totalWidth = cardCount === 0 ? 0 : cardWidth + step * overlapCount;
   const valueFontSize = clampNumber(
-    Math.round(cardWidth * (compact ? 0.44 : 0.42)),
-    compact ? 24 : 28,
-    compact ? 42 : 54
+    Math.round(cardWidth * 0.48),
+    cardWidth < 62 ? 22 : compact ? 30 : 36,
+    68
   );
-  const cornerValueFontSize = clampNumber(
-    Math.round(cardWidth * (compact ? 0.28 : 0.24)),
-    compact ? 15 : 16,
-    compact ? 21 : 22
-  );
-  const useInsetValues = fittedStep < cardWidth * 0.78;
+  const useCornerValue = step < cardWidth * 0.72;
 
-  return {
-    cardWidth,
-    cardHeight,
-    totalWidth,
-    valueFontSize,
-    cornerValueFontSize,
-    step: fittedStep,
-    useInsetValues
-  };
+  return { cardHeight, cardWidth, step, totalWidth, useCornerValue, valueFontSize };
 }
 
-const revealEase = [0.22, 1, 0.36, 1] as const;
-const layoutSpring = {
-  type: "spring",
-  stiffness: 320,
-  damping: 30,
-  mass: 0.82
-} as const;
-
-function revealMotion(
-  reducedMotion: boolean,
-  options: {
-    delay?: number;
-    duration?: number;
-    x?: number;
-    y?: number;
-  } = {}
-) {
+function revealMotion(reducedMotion: boolean, delay = 0, y = 20) {
   if (reducedMotion) {
     return {};
   }
-
   return {
-    initial: {
-      opacity: 0,
-      x: options.x ?? 0,
-      y: options.y ?? 18
-    },
-    animate: {
-      opacity: 1,
-      x: 0,
-      y: 0
-    },
-    transition: {
-      duration: options.duration ?? 0.56,
-      delay: options.delay ?? 0,
-      ease: revealEase
-    }
+    animate: { opacity: 1, y: 0 },
+    initial: { opacity: 0, y },
+    transition: { delay, duration: 0.48, ease: revealEase }
   };
 }
 
@@ -687,9 +249,7 @@ export function App() {
   const [route, setRoute] = useState<RouteState>(() => parseRoute(new URL(window.location.href)));
 
   useEffect(() => {
-    const handleLocation = () => {
-      setRoute(parseRoute(new URL(window.location.href)));
-    };
+    const handleLocation = () => setRoute(parseRoute(new URL(window.location.href)));
     window.addEventListener("popstate", handleLocation);
     window.addEventListener("hashchange", handleLocation);
     return () => {
@@ -702,28 +262,19 @@ export function App() {
     if (route.kind !== "room" || !route.token) {
       return;
     }
-
     persistRoomToken(route.roomId, route.token);
-
-    if (!window.location.hash) {
-      return;
+    if (window.location.hash) {
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
     }
-
-    const cleanUrl = `${window.location.pathname}${window.location.search}`;
-    window.history.replaceState(window.history.state, "", cleanUrl);
   }, [route]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      useRoomStore.getState().tickRealClock();
-    }, 200);
-    return () => {
-      window.clearInterval(timer);
-    };
+    const timer = window.setInterval(() => useRoomStore.getState().tickRealClock(), 200);
+    return () => window.clearInterval(timer);
   }, []);
 
   return (
-    <main className="app-shell grain-overlay min-h-screen text-stone-50">
+    <main className="app-shell">
       {route.kind === "landing" ? (
         <LandingScreen />
       ) : (
@@ -736,6 +287,7 @@ export function App() {
 function LandingScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showRules, setShowRules] = useState(false);
   const reducedMotion = Boolean(useReducedMotion());
 
   const createRoom = async () => {
@@ -743,545 +295,149 @@ function LandingScreen() {
     setError(null);
     try {
       const response = await fetch("/api/rooms", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({})
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json" },
+        method: "POST"
       });
       if (!response.ok) {
-        throw new Error("Couldn't open the room.");
+        throw new Error("Room couldn't open. Try again.");
       }
       const payload = createRoomResponseSchema.parse(await readJsonOrThrow(response));
       window.location.assign(payload.hostInviteUrl);
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Couldn't open the room.");
+      setError(caughtError instanceof Error ? caughtError.message : "Room couldn't open. Try again.");
       setBusy(false);
     }
   };
 
-  const scrollToHowToPlay = () => {
-    document.getElementById("how-to-play")?.scrollIntoView({
-      behavior: reducedMotion ? "auto" : "smooth",
-      block: "start"
+  useEffect(() => {
+    if (!showRules) {
+      return undefined;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("how-to-play")?.scrollIntoView({
+        behavior: reducedMotion ? "auto" : "smooth",
+        block: "start"
+      });
     });
+    return () => window.cancelAnimationFrame(frame);
+  }, [reducedMotion, showRules]);
+
+  const revealRules = () => {
+    if (showRules) {
+      document.getElementById("how-to-play")?.scrollIntoView({
+        behavior: reducedMotion ? "auto" : "smooth",
+        block: "start"
+      });
+      return;
+    }
+    setShowRules(true);
   };
 
-  const guideSteps = [
-    {
-      body: "One person opens the room and sends the link. As soon as both of you are in, the room is live.",
-      demo: <InviteFlowDemo reducedMotion={reducedMotion} />,
-      foot: "No sign-in. No code. Just the link.",
-      kicker: "Join",
-      number: "01",
-      title: "Open the room. Send the link."
-    },
-    {
-      body: "When the focus cue lands, stop talking. That shared silence is the mechanic.",
-      demo: <FocusDemo reducedMotion={reducedMotion} />,
-      foot: "Narrating during the round usually makes the timing worse.",
-      kicker: "Focus",
-      number: "02",
-      title: "Get quiet together."
-    },
-    {
-      body: "Your hand is already sorted. Only the lowest number matters, so play that one when it feels right.",
-      demo: <LowestCardDemo reducedMotion={reducedMotion} />,
-      foot: "Clear both hands to finish the level.",
-      kicker: "Play",
-      number: "03",
-      title: "Trust the lowest card."
-    },
-    {
-      body: "If someone jumps the order, you lose a life. If both of you get stuck, spend a scan and burn the lowest card from both hands.",
-      demo: <RiskAndScanDemo reducedMotion={reducedMotion} />,
-      foot: "Scans are limited. Use them before chaos compounds.",
-      kicker: "Recover",
-      number: "04",
-      title: "Use scans before panic."
-    }
-  ] as const;
-
   return (
-    <section className="landing-shell">
+    <section className={classes("landing-page", showRules && "landing-page-rules-open")}>
       <section className="landing-hero">
-        <motion.div
-          {...revealMotion(reducedMotion, {
-            y: 18
-          })}
-          className="landing-copy"
-        >
-          <p className="landing-kicker">Silent timing game for two players</p>
-          <h1 className="landing-title">Quiet Signal</h1>
-          <p className="landing-subtitle">
-            Open a private room. Send the link. Talk before the cue, then play by timing alone.
-          </p>
+        <motion.div {...revealMotion(reducedMotion)} className="landing-copy">
+          <p className="wordmark">The Mind</p>
+          <h1>Play the next number.<br />Without knowing theirs.</h1>
+          <p className="landing-lead">Open a private room. Send one link. Get quiet.</p>
           <div className="landing-actions">
             <button
               className={buttonClass("primary")}
               disabled={busy}
-              onClick={() => {
-                void createRoom();
-              }}
+              onClick={() => void createRoom()}
               type="button"
             >
-              {busy ? "Opening room..." : "Open a room"}
+              {busy ? "Opening…" : "Open a room"}
             </button>
             <button
-              className={buttonClass("secondary")}
-              onClick={scrollToHowToPlay}
+              aria-controls="how-to-play"
+              aria-expanded={showRules}
+              className={buttonClass("text")}
+              onClick={revealRules}
               type="button"
             >
               How to play
             </button>
           </div>
-          <div className="landing-meta">
-            <span>Private room</span>
-            <span>2 players</span>
-            <span>12 levels</span>
-            <span>No account</span>
-          </div>
-          <HeroGuideCue onClick={scrollToHowToPlay} reducedMotion={reducedMotion} />
-          {error ? <p className="landing-error">{error}</p> : null}
+          {error ? <p className="inline-error" role="alert">{error}</p> : null}
         </motion.div>
 
-        <LandingTablePreview />
+        <motion.div {...revealMotion(reducedMotion, 0.08, 14)} className="landing-preview">
+          <div className="preview-partner">
+            <span>Partner</span>
+            <div className="preview-backs" aria-hidden="true">
+              <i />
+              <i />
+            </div>
+          </div>
+          <div className="preview-pile">
+            <span>Shared pile</span>
+            <strong>37</strong>
+          </div>
+          <div className="preview-hand">
+            {[52, 68, 91].map((value, index) => (
+              <i className={index === 0 ? "preview-card-active" : ""} key={value}>{value}</i>
+            ))}
+          </div>
+        </motion.div>
       </section>
 
-      <HowToPlaySection guideSteps={guideSteps} reducedMotion={reducedMotion} />
+      {showRules ? (
+        <section className="rules-strip" id="how-to-play">
+          <div className="rules-heading">
+            <p className="eyebrow">How to play</p>
+            <h2>Four moves. Then trust the timing.</h2>
+          </div>
+          <div className="rules-grid">
+            <RuleStep number="1" title="Open" body="Create a private room." />
+            <RuleStep number="2" title="Share" body="Send the invite link." />
+            <RuleStep number="3" title="Focus" body="Stop talking at the cue." />
+            <RuleStep number="4" title="Play lowest" body="Tap only your lowest card." />
+          </div>
+          <p className="rules-note">
+            Wrong order costs one life. If both players agree, use a throwing star to discard the lowest card from both hands.
+          </p>
+        </section>
+      ) : null}
+
+      <Attribution />
     </section>
   );
 }
 
-function LandingSignalField(props: { reducedMotion: boolean }) {
+function RuleStep(props: { number: string; title: string; body: string }) {
   return (
-    <motion.div
-      {...revealMotion(props.reducedMotion, {
-        delay: 0.08,
-        y: 18
-      })}
-      aria-label="Animated game table preview"
-      className="landing-signal-field"
-    >
-      <div className="landing-table-vignette" />
-      <motion.svg
-        animate={props.reducedMotion ? undefined : { opacity: [0.62, 0.95, 0.62] }}
-        aria-hidden="true"
-        className="landing-route-map"
-        transition={props.reducedMotion ? undefined : {
-          duration: 5.2,
-          ease: "easeInOut",
-          repeat: Number.POSITIVE_INFINITY
-        }}
-        viewBox="0 0 740 620"
-      >
-        <path className="route-line route-line-soft" d="M116 486 C248 358 301 329 370 310 C447 289 504 251 624 128" />
-        <motion.path
-          animate={props.reducedMotion ? undefined : { pathLength: [0.12, 1, 0.12] }}
-          className="route-line route-line-active"
-          d="M116 486 C248 358 301 329 370 310 C447 289 504 251 624 128"
-          initial={props.reducedMotion ? undefined : { pathLength: 0.12 }}
-          transition={props.reducedMotion ? undefined : {
-            duration: 4,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY
-          }}
-        />
-        <path className="route-line route-line-soft" d="M120 142 C238 221 310 264 370 310 C441 364 517 404 634 486" />
-        <motion.path
-          animate={props.reducedMotion ? undefined : { pathLength: [1, 0.18, 1] }}
-          className="route-line route-line-warm"
-          d="M120 142 C238 221 310 264 370 310 C441 364 517 404 634 486"
-          initial={props.reducedMotion ? undefined : { pathLength: 1 }}
-          transition={props.reducedMotion ? undefined : {
-            duration: 4.8,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY
-          }}
-        />
-      </motion.svg>
-
-      <div className="landing-table-node landing-table-node-host">
-        <p className="landing-status-label">You</p>
-        <div className="landing-live-hand" aria-hidden="true">
-          <span className="landing-face-card landing-live-card-live">31</span>
-          <span className="landing-face-card landing-live-card-muted">77</span>
-        </div>
+    <article className="rule-step">
+      <span>{props.number}</span>
+      <div>
+        <h3>{props.title}</h3>
+        <p>{props.body}</p>
       </div>
-
-      <div className="landing-table-node landing-table-node-guest">
-        <p className="landing-status-label">Partner</p>
-        <div className="landing-status-stack" aria-hidden="true">
-          <span className="landing-card-back" />
-          <span className="landing-card-back" />
-          <span className="landing-card-back" />
-        </div>
-      </div>
-
-      <div className="landing-orbit-zone">
-        <motion.div
-          animate={props.reducedMotion ? undefined : { rotate: 360 }}
-          className="landing-orbit"
-          transition={props.reducedMotion ? undefined : {
-            duration: 18,
-            ease: "linear",
-            repeat: Number.POSITIVE_INFINITY
-          }}
-        >
-          <span className="landing-orbit-card orbit-card-1">08</span>
-          <span className="landing-orbit-card orbit-card-2">64</span>
-          <span className="landing-orbit-card orbit-card-3">95</span>
-        </motion.div>
-        <motion.div
-          animate={props.reducedMotion ? undefined : { scale: [0.9, 1.06, 0.9], opacity: [0.24, 0.62, 0.24] }}
-          className="landing-pulse-ring landing-pulse-ring-a"
-          transition={props.reducedMotion ? undefined : {
-            duration: 3.8,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY
-          }}
-        />
-        <motion.div
-          animate={props.reducedMotion ? undefined : { scale: [1.04, 0.92, 1.04], opacity: [0.16, 0.34, 0.16] }}
-          className="landing-pulse-ring landing-pulse-ring-b"
-          transition={props.reducedMotion ? undefined : {
-            duration: 5.4,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY
-          }}
-        />
-        <div className="landing-table-core">
-          <p className="landing-table-kicker">Shared pile</p>
-          <div className="landing-pile">
-            <span className="landing-face-card landing-face-card-tilt-left">18</span>
-            <span className="landing-face-card landing-face-card-tilt-right">42</span>
-          </div>
-          <p className="landing-table-copy">Lowest safe number wins the moment.</p>
-        </div>
-      </div>
-    </motion.div>
+    </article>
   );
 }
 
-function HeroGuideCue(props: { reducedMotion: boolean; onClick: () => void }) {
+function Attribution() {
   return (
-    <button
-      className="hero-guide-cue"
-      onClick={props.onClick}
-      type="button"
-    >
-      <span className="hero-guide-cue-kicker">New here?</span>
-      <span className="hero-guide-cue-title">Read the 30-second rules</span>
-      <motion.span
-        animate={props.reducedMotion ? undefined : { x: [0, 4, 0] }}
-        aria-hidden="true"
-        className="hero-guide-cue-arrow"
-        transition={props.reducedMotion ? undefined : {
-          duration: 1.7,
-          ease: "easeInOut",
-          repeat: Number.POSITIVE_INFINITY
-        }}
-      >
-        &gt;
-      </motion.span>
-    </button>
-  );
-}
-
-function LandingTablePreview() {
-  const reducedMotion = Boolean(useReducedMotion());
-
-  return <LandingSignalField reducedMotion={reducedMotion} />;
-}
-
-function HowToPlaySection(props: {
-  guideSteps: ReadonlyArray<{
-    body: string;
-    demo: ReactNode;
-    foot: string;
-    kicker: string;
-    number: string;
-    title: string;
-  }>;
-  reducedMotion: boolean;
-}) {
-  return (
-    <motion.section
-      {...revealMotion(props.reducedMotion, {
-        delay: 0.12,
-        duration: 0.6,
-        y: 24
-      })}
-      className="rules-section"
-      id="how-to-play"
-    >
-      <div className="rules-heading">
-        <p className="rules-kicker">How the round works</p>
-        <h2 className="rules-title">The whole game is one clean loop.</h2>
-        <p className="rules-lead">
-          Start together, stay quiet, play the smallest card when the timing feels right.
-        </p>
-      </div>
-
-      <div className="rules-timeline">
-        {props.guideSteps.map((step, index) => (
-          <GuideCard
-            body={step.body}
-            demo={step.demo}
-            foot={step.foot}
-            key={step.number}
-            kicker={`${step.number} ${step.kicker}`}
-            reducedMotion={props.reducedMotion}
-            title={step.title}
-            x={index % 2 === 0 ? -14 : 14}
-          />
-        ))}
-      </div>
-
-      <div className="rules-summary">
-        <span>Clear both hands to move on.</span>
-        <span>Beat level 12 to finish the run.</span>
-        <span>Silence is the mechanic.</span>
-      </div>
-    </motion.section>
-  );
-}
-
-function GuideCard(props: {
-  kicker: string;
-  title: string;
-  body: string;
-  foot: string;
-  demo: ReactNode;
-  reducedMotion: boolean;
-  x: number;
-}) {
-  return (
-    <motion.article
-      {...revealMotion(props.reducedMotion, {
-        duration: 0.54,
-        x: props.x,
-        y: 18
-      })}
-      className="guide-card"
-    >
-      <div className="guide-card-inner">
-        <div className="guide-card-index">{props.kicker}</div>
-        <div className="guide-card-copy">
-          <h3>{props.title}</h3>
-          <p>{props.body}</p>
-          <p className="guide-card-foot">{props.foot}</p>
-        </div>
-        <div className="guide-demo-stage">
-          {props.demo}
-        </div>
-      </div>
-    </motion.article>
-  );
-}
-
-function InviteFlowDemo(props: { reducedMotion: boolean }) {
-  return (
-    <div className="guide-demo invite-demo">
-      <div className="guide-demo-rail">
-        <span className="guide-demo-rail-label">You</span>
-        <div className="guide-demo-stack">
-          <span className="guide-mini-back-card" />
-          <span className="guide-mini-back-card" />
-        </div>
-      </div>
-      <motion.div
-        animate={props.reducedMotion ? undefined : { opacity: [0.72, 1, 0.72], scale: [0.98, 1.03, 0.98] }}
-        className="guide-link-pill"
-        transition={props.reducedMotion ? undefined : {
-          duration: 2.6,
-          ease: "easeInOut",
-          repeat: Number.POSITIVE_INFINITY
-        }}
-      >
-        Invite link
-      </motion.div>
-      <div className="guide-demo-rail guide-demo-rail-right">
-        <div className="guide-demo-stack">
-          <span className="guide-mini-back-card" />
-          <span className="guide-mini-back-card" />
-        </div>
-        <span className="guide-demo-rail-label">Partner</span>
-      </div>
-      <motion.span
-        animate={props.reducedMotion ? undefined : { opacity: [0.18, 1, 0.18], scale: [0.84, 1.08, 0.84], x: [-44, 44, -44] }}
-        className="guide-transfer-dot"
-        transition={props.reducedMotion ? undefined : {
-          duration: 2.8,
-          ease: "easeInOut",
-          repeat: Number.POSITIVE_INFINITY
-        }}
-      />
-    </div>
-  );
-}
-
-function FocusDemo(props: { reducedMotion: boolean }) {
-  return (
-    <div className="guide-demo focus-demo">
-      <div className="guide-demo-chip">Focus</div>
-      <motion.div
-        animate={props.reducedMotion ? undefined : { scale: [0.94, 1.05, 0.94] }}
-        className="guide-focus-ring"
-        transition={props.reducedMotion ? undefined : {
-          duration: 2.4,
-          ease: "easeInOut",
-          repeat: Number.POSITIVE_INFINITY
-        }}
-      >
-        <motion.div
-          animate={props.reducedMotion ? undefined : { opacity: [0.72, 1, 0.72], scale: [0.96, 1.02, 0.96] }}
-          className="guide-focus-core"
-          transition={props.reducedMotion ? undefined : {
-            duration: 2.2,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY
-          }}
-        />
-      </motion.div>
-      <div className="guide-demo-count">2s</div>
-      <p className="guide-demo-label">No talking once it starts.</p>
-    </div>
-  );
-}
-
-function LowestCardDemo(props: { reducedMotion: boolean }) {
-  return (
-    <div className="guide-demo lowest-card-demo">
-      <div className="guide-play-slot">
-        <motion.div
-          animate={props.reducedMotion ? undefined : { opacity: [0, 0, 1, 1, 0], scale: [0.95, 0.95, 1, 1, 0.95], y: [6, 6, 0, 0, 0] }}
-          className="guide-mini-face-card guide-play-landed"
-          transition={props.reducedMotion ? undefined : {
-            duration: 3.2,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY,
-            times: [0, 0.24, 0.38, 0.82, 1]
-          }}
-        >
-          23
-        </motion.div>
-      </div>
-      <motion.div
-        animate={props.reducedMotion ? undefined : { opacity: [0.18, 0.34, 0.18] }}
-        className="guide-play-path"
-        transition={props.reducedMotion ? undefined : {
-          duration: 2.6,
-          ease: "easeInOut",
-          repeat: Number.POSITIVE_INFINITY
-        }}
-      />
-      <div className="guide-play-hand">
-        <motion.div
-          animate={props.reducedMotion ? undefined : {
-            x: [0, 0, 58, 58, 0],
-            y: [0, 0, -82, -82, 0],
-            opacity: [1, 1, 1, 0, 0],
-            scale: [1, 1, 0.98, 0.98, 1]
-          }}
-          className="guide-mini-face-card guide-play-moving"
-          transition={props.reducedMotion ? undefined : {
-            duration: 3.2,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY,
-            times: [0, 0.24, 0.38, 0.82, 1]
-          }}
-        >
-          23
-        </motion.div>
-        <div className="guide-mini-face-card guide-mini-face-card-muted">31</div>
-        <div className="guide-mini-face-card guide-mini-face-card-muted">77</div>
-      </div>
-    </div>
-  );
-}
-
-function RiskAndScanDemo(props: { reducedMotion: boolean }) {
-  return (
-    <div className="guide-demo risk-demo">
-      <div className="guide-risk-status">
-        <motion.span
-          animate={props.reducedMotion ? undefined : { opacity: [0.54, 1, 0.54] }}
-          className="guide-risk-pill guide-risk-pill-danger"
-          transition={props.reducedMotion ? undefined : {
-            duration: 2.2,
-            ease: "easeInOut",
-            repeat: Number.POSITIVE_INFINITY
-          }}
-        >
-          -1 life
-        </motion.span>
-        <span className="guide-risk-pill guide-risk-pill-scan">1 scan</span>
-      </div>
-      <div className="guide-risk-lanes">
-        <div className="guide-risk-hand guide-risk-hand-left">
-          <span className="guide-mini-back-card guide-mini-back-card-faint" />
-          <motion.div
-            animate={props.reducedMotion ? undefined : { x: [0, 0, 44, 44, 0], y: [0, 0, 20, 20, 0], opacity: [1, 1, 1, 0, 0] }}
-            className="guide-mini-face-card guide-risk-move-left"
-            transition={props.reducedMotion ? undefined : {
-              duration: 3.1,
-              ease: "easeInOut",
-              repeat: Number.POSITIVE_INFINITY,
-              times: [0, 0.22, 0.4, 0.8, 1]
-            }}
-          >
-            14
-          </motion.div>
-        </div>
-        <div className="guide-risk-center">
-          <motion.div
-            animate={props.reducedMotion ? undefined : { scale: [0.92, 1.06, 0.92], opacity: [0.62, 1, 0.62] }}
-            className="guide-scan-flare"
-            transition={props.reducedMotion ? undefined : {
-              duration: 2.4,
-              ease: "easeInOut",
-              repeat: Number.POSITIVE_INFINITY
-            }}
-          />
-        </div>
-        <div className="guide-risk-hand guide-risk-hand-right">
-          <motion.div
-            animate={props.reducedMotion ? undefined : { x: [0, 0, -44, -44, 0], y: [0, 0, 20, 20, 0], opacity: [1, 1, 1, 0, 0] }}
-            className="guide-mini-face-card guide-risk-move-right"
-            transition={props.reducedMotion ? undefined : {
-              duration: 3.1,
-              ease: "easeInOut",
-              repeat: Number.POSITIVE_INFINITY,
-              times: [0, 0.22, 0.4, 0.8, 1]
-            }}
-          >
-            19
-          </motion.div>
-          <span className="guide-mini-back-card guide-mini-back-card-faint" />
-        </div>
-      </div>
-    </div>
+    <p className="attribution">
+      Unofficial fan-made adaptation inspired by <cite>The Mind</cite>. The game and its mechanics are not original to this project.
+      <span aria-label={`Version ${APP_VERSION}`}>v{APP_VERSION}</span>
+    </p>
   );
 }
 
 function CenteredMessage(props: { title: string; body: string; action?: ReactNode }) {
-  const reducedMotion = Boolean(useReducedMotion());
-
   return (
-    <section className="message-shell mx-auto flex min-h-[calc(100vh-3rem)] max-w-3xl items-center justify-center">
-      <motion.div
-        {...revealMotion(reducedMotion, {
-          duration: 0.48,
-          y: 16
-        })}
-        className="message-panel panel-surface rounded-[1.8rem] p-8 text-center"
-      >
-        <p className="message-kicker text-xs uppercase tracking-[0.34em] text-[var(--accent-soft)]">Room</p>
-        <h1 className="message-title mx-auto mt-3 max-w-[20rem] text-balance text-3xl font-black text-[var(--card-front)]">{props.title}</h1>
-        <p className="message-body mx-auto mt-4 max-w-[24rem] text-balance text-sm leading-7 text-[var(--muted)]">{props.body}</p>
-        {props.action ? <div className="message-actions mt-6">{props.action}</div> : null}
-      </motion.div>
+    <section className="message-screen">
+      <div className="message-block">
+        <p className="wordmark">The Mind</p>
+        <h1>{props.title}</h1>
+        <p>{props.body}</p>
+        {props.action ? <div className="message-action">{props.action}</div> : null}
+      </div>
+      <Attribution />
     </section>
   );
 }
@@ -1295,34 +451,18 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
   const levelAdvanceHoldUntilMs = useRoomStore((state) => state.levelAdvanceOverlayHoldUntilMs);
   const nowMs = useRoomStore((state) => state.nowMs);
   const reducedMotion = Boolean(useReducedMotion());
-
-  const { sendEvent, reconnectNow } = useRoomSession(props.roomId, props.token);
+  const { reconnectNow, sendEvent } = useRoomSession(props.roomId, props.token);
   const { playCardTap } = useRoomCardSounds(snapshot);
 
   useEffect(() => {
     if (!banner) {
       return undefined;
     }
-    const timer = window.setTimeout(() => {
-      clearBanner();
-    }, 2400);
-    return () => {
-      window.clearTimeout(timer);
-    };
+    const timer = window.setTimeout(clearBanner, 2400);
+    return () => window.clearTimeout(timer);
   }, [banner, clearBanner]);
 
-  const players = snapshot ? selfAndOther(snapshot) : null;
-  const handMeasureRef = useRef<HTMLDivElement | null>(null);
-  const handLayout = useHandFanLayout(handMeasureRef, players?.self.hand.length ?? 0);
-  const isHoldingLevelAdvanceOverlay =
-    levelAdvanceHoldUntilMs !== null && nowMs < levelAdvanceHoldUntilMs;
-
   useEffect(() => {
-    const requestPlayLowestCard = () => {
-      playCardTap();
-      sendEvent({ type: "play_lowest_card" });
-    };
-
     const onKeyDown = (event: KeyboardEvent) => {
       if (!snapshot) {
         return;
@@ -1335,97 +475,79 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
       const key = event.key.toLowerCase();
       if (key === "f") {
         void toggleFullscreen();
-        return;
-      }
-      if (snapshot.phase === "in_round" && event.key === " ") {
+      } else if (isRoundLive(snapshot, Date.now()) && event.key === " ") {
         event.preventDefault();
-        requestPlayLowestCard();
-        return;
-      }
-      if (key === "p" && snapshot.canRequestPause) {
+        playCardTap();
+        sendEvent({ type: "play_lowest_card" });
+      } else if (key === "p" && isRoundLive(snapshot, Date.now()) && snapshot.pendingRequest === null) {
         sendEvent({ type: "request_pause" });
-        return;
-      }
-      if (key === "s" && snapshot.canRequestScan) {
+      } else if (
+        (key === "t" || key === "s")
+        && isRoundLive(snapshot, Date.now())
+        && snapshot.pendingRequest === null
+        && snapshot.scans > 0
+      ) {
         sendEvent({ type: "request_scan" });
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [playCardTap, sendEvent, snapshot]);
 
   if (!props.token) {
     return (
       <CenteredMessage
-        body="This invite link is incomplete. Open the full link that was shared with you."
+        action={<a className={buttonClass("text")} href="/">Back home</a>}
+        body="Open the full link that was shared with you."
         title="Invite link incomplete"
       />
     );
   }
 
-  if (!snapshot || !players) {
+  if (!snapshot) {
     return (
       <CenteredMessage
-        action={
-          connectionState === "error" || connectionState === "closed" ? (
-            <button className={buttonClass("primary")} onClick={() => reconnectNow()} type="button">
-              Retry
-            </button>
-          ) : undefined
-        }
-        body={error ?? "Joining the room."}
-        title="Joining room"
+        action={connectionState === "error" || connectionState === "closed" ? (
+          <button className={buttonClass("primary")} onClick={reconnectNow} type="button">Retry now</button>
+        ) : undefined}
+        body={error ?? "Joining the room…"}
+        title={error ? "Couldn't join the room" : "Joining room"}
       />
     );
   }
 
-  const { self, other } = players;
-  const focusRemainingMs =
-    snapshot.transitionEndsAt === null ? 0 : Math.max(0, snapshot.transitionEndsAt - nowMs);
-  const lowestPlayableValue = self.hand[0] ?? null;
-  const isRoundInteractive =
-    snapshot.phase === "in_round" ||
-    (snapshot.phase === "focus_transition" && focusRemainingMs === 0);
-  const immersivePhase = isImmersivePhase(snapshot.phase);
-  const tablePhaseLabel = describeTablePhase(snapshot.phase, focusRemainingMs);
-  const requestPlayLowestCard = () => {
+  const { other, self } = selfAndOther(snapshot);
+  const focusRemainingMs = snapshot.transitionEndsAt === null
+    ? 0
+    : Math.max(0, snapshot.transitionEndsAt - nowMs);
+  const isRoundInteractive = isRoundLive(snapshot, nowMs);
+  const canRequestPause = isRoundInteractive && snapshot.pendingRequest === null;
+  const canRequestStar = canRequestPause && snapshot.scans > 0;
+  const isHoldingLevelClear = levelAdvanceHoldUntilMs !== null && nowMs < levelAdvanceHoldUntilMs;
+  const connectionInterrupted = connectionState === "closed"
+    || connectionState === "error"
+    || connectionState === "reconnecting";
+  const playLowestCard = () => {
     playCardTap();
     sendEvent({ type: "play_lowest_card" });
   };
 
   return (
-    <section className="room-shell flex min-h-[calc(100vh-3rem)] flex-col gap-5 relative">
-      <motion.header
-        {...revealMotion(reducedMotion, {
-          duration: 0.5,
-          y: 10
-        })}
-        className={classes(
-          "room-header flex flex-col gap-3 transition duration-300 sm:flex-row sm:items-center sm:justify-between",
-          immersivePhase && "lg:opacity-62",
-          isRoundInteractive && "lg:opacity-48"
-        )}
-      >
-        <div className="room-title-block">
-          <p className="room-brandline text-xs uppercase tracking-[0.34em] text-[var(--accent-soft)]">
-            Room {snapshot.roomId}
-          </p>
-          <div className="room-level-row mt-2 flex flex-wrap items-end gap-3">
-            <h1 className="display-face text-3xl font-black tracking-tight text-[var(--card-front)] sm:text-4xl">
-              Level {snapshot.currentLevel}
-            </h1>
-            <div className="room-progress-pill rounded-full px-3 py-1 text-sm">
-              {snapshot.maxLevel} level run
-            </div>
-          </div>
+    <section className={classes("room-screen", connectionInterrupted && "room-screen-interrupted")}>
+      <motion.header {...revealMotion(reducedMotion, 0, 10)} className="room-topbar">
+        <div className="room-brand">
+          <p className="wordmark">The Mind</p>
+          <span>Room {snapshot.roomId}</span>
         </div>
-        <div className="room-header-actions flex flex-wrap items-center gap-2">
-          <ConnectionPill state={connectionState} />
-          <StatPill label="Lives" tone="danger" value={snapshot.lives} />
-          <StatPill label="Scans" tone="warning" value={snapshot.scans} />
+        <div className="level-readout">
+          <strong>Level {snapshot.currentLevel}</strong>
+          <span>/ {snapshot.maxLevel}</span>
+        </div>
+        <div className="room-status">
+          <ConnectionBadge state={connectionState} />
+          <Resource label="Lives" value={snapshot.lives} />
+          <Resource label="Stars" value={snapshot.scans} />
           {snapshot.inviteLink ? <CopyInviteButton inviteLink={snapshot.inviteLink} /> : null}
         </div>
       </motion.header>
@@ -1433,343 +555,420 @@ function RoomScreen(props: { roomId: string; token: string | null }) {
       <AnimatePresence>
         {banner ? (
           <motion.div
-            animate={{ opacity: 1, scale: 1, y: 0 }}
+            animate={{ opacity: 1, y: 0 }}
             aria-live="polite"
-            className="room-banner-layer"
-            exit={{ opacity: 0, scale: 0.97, y: -12 }}
-            initial={{ opacity: 0, scale: 0.9, y: -24 }}
+            className={classes("event-banner", `event-banner-${banner.tone}`)}
+            exit={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -16 }}
             key={`${banner.tone}-${banner.text}`}
             role="status"
-            transition={{
-              bounce: 0.14,
-              damping: 26,
-              mass: 0.82,
-              stiffness: 360,
-              type: "spring"
-            }}
           >
-            <div
-              className={classes(
-                "banner-popover",
-                banner.celebration === "run_complete" && "banner-popover-grand"
-              )}
-            >
-              {banner.celebration ? (
-                <BannerCelebrationBurst kind={banner.celebration} reducedMotion={reducedMotion} />
-              ) : null}
-              <div className={bannerClass(banner.tone)}>
-                <span aria-hidden="true" className="banner-mark" />
-                <div className="banner-copy">
-                  <span className="banner-kicker">{bannerToneLabel(banner.tone)}</span>
-                  <span className="banner-text">{banner.text}</span>
-                </div>
-              </div>
-            </div>
+            <span>{bannerToneLabel(banner.tone)}</span>
+            <strong>{banner.text}</strong>
           </motion.div>
         ) : null}
       </AnimatePresence>
 
-      <div className="room-layout grid flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_17.5rem]">
-        <motion.div
-          {...revealMotion(reducedMotion, {
-            delay: 0.05,
-            duration: 0.58,
-            x: -16,
-            y: 16
-          })}
-          className={classes(
-            "table-stage relative overflow-hidden rounded-[2.15rem] p-4 sm:p-6",
-            immersivePhase && "table-stage-live"
-          )}
-        >
-          <div className="table-play-stack relative flex min-h-[60vh] flex-col sm:min-h-[62vh]">
-            <PlayerRail className="table-overlap-top" placement="top" player={other} />
+      <motion.section {...revealMotion(reducedMotion, 0.04, 0)} className="game-board">
+        <PartnerLane player={other} />
 
-            <div className="table-pile-slot flex flex-1 items-center justify-center">
-              <div
-                className={classes(
-                  "shared-pile-stage table-overlap-middle w-full max-w-3xl px-5 py-5 sm:px-8 sm:py-7",
-                  snapshot.pendingRequest && "shared-pile-stage-requesting"
-                )}
-              >
-                <div className="mb-4 flex flex-wrap items-center gap-3 sm:grid sm:grid-cols-[auto_1fr_auto] sm:gap-4">
-                  <div>
-                    <p className="room-section-kicker text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
-                      Shared pile
-                    </p>
-                    <h2 className="table-title">Table center</h2>
-                  </div>
-                  <div className="table-toolbar flex flex-wrap items-center gap-2 sm:justify-center">
-                    <div className="table-phase-badge rounded-full px-3 py-2 text-xs uppercase tracking-[0.22em]">
-                      {tablePhaseLabel}
-                    </div>
-                    <button
-                      className={buttonClass("secondary")}
-                      disabled={!snapshot.canRequestPause}
-                      onClick={() => {
-                        sendEvent({ type: "request_pause" });
-                      }}
-                      type="button"
-                    >
-                      Pause
-                    </button>
-                    <button
-                      className={buttonClass("secondary")}
-                      disabled={!snapshot.canRequestScan}
-                      onClick={() => {
-                        sendEvent({ type: "request_scan" });
-                      }}
-                      type="button"
-                    >
-                      Scan
-                    </button>
-                  </div>
-                  <div className="count-pill rounded-full px-3 py-1 text-sm">
-                    {countLabel(snapshot.pile.length, "card")}
-                  </div>
-                </div>
-                {snapshot.pendingRequest ? (
-                  <div className="table-request-layer">
-                    <PendingRequestPanel
-                      selfSeatId={snapshot.viewerSeatId}
-                      sendEvent={sendEvent}
-                      snapshot={snapshot}
-                    />
-                  </div>
-                ) : null}
-                <CenterPile phase={snapshot.phase} pile={snapshot.pile} reducedMotion={reducedMotion} />
-              </div>
+        {connectionInterrupted ? (
+          <div className="reconnect-strip" role="status">
+            <div>
+              <strong>Connection lost</strong>
+              <span>Your last confirmed table stays visible.</span>
             </div>
+            <button className={buttonClass("secondary")} onClick={reconnectNow} type="button">Retry now</button>
+          </div>
+        ) : null}
 
-            <div className="live-hand-zone table-overlap-bottom rounded-[1.8rem] p-4 sm:p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
-                    Your hand
-                  </p>
-                  <p className="mt-2 text-sm text-[var(--muted)]">Lowest card is the only legal play.</p>
-                </div>
-                <div className="count-pill rounded-full px-3 py-1 text-sm">
-                  {countLabel(self.handCount, "card")}
-                </div>
-              </div>
-              <div className="hand-fan-stage" ref={handMeasureRef}>
-                <div
-                  className="hand-fan-row"
-                  style={{
-                    minHeight: Math.max(handLayout.cardHeight + 12, 144),
-                    width: handLayout.totalWidth || undefined
-                  }}
-                >
-                  {self.hand.map((value, index) => (
-                    <motion.button
-                      animate={reducedMotion ? undefined : { y: 0, opacity: 1 }}
-                      className="signal-card-button relative shrink-0"
-                      disabled={index !== 0 || !isRoundInteractive}
-                      initial={reducedMotion ? undefined : { y: 14, opacity: 0 }}
-                      key={value}
-                      layout={!reducedMotion}
-                      onPointerLeave={index === 0 && !reducedMotion ? resetLiveCardPointer : undefined}
-                      onPointerMove={
-                        index === 0 && isRoundInteractive && !reducedMotion
-                          ? updateLiveCardPointer
-                          : undefined
-                      }
-                      onClick={() => {
-                        requestPlayLowestCard();
-                      }}
-                      transition={reducedMotion ? undefined : layoutSpring}
-                      type="button"
-                      style={{
-                        height: handLayout.cardHeight,
-                        marginLeft: index === 0 ? 0 : handLayout.step - handLayout.cardWidth,
-                        width: handLayout.cardWidth,
-                        zIndex: self.hand.length - index
-                      }}
-                      whileTap={reducedMotion ? undefined : { scale: 0.97, y: 4 }}
-                    >
-                      <span
-                        className={classes(
-                          "signal-card-shell flex size-full items-center justify-center rounded-[1.55rem] border-2 font-black transition",
-                          index === 0
-                            ? "signal-card-live border-[var(--accent)] bg-[var(--card-front)] text-[var(--card-ink)]"
-                            : "signal-card-muted"
-                        )}
-                      >
-                        {handLayout.useInsetValues && index !== 0 ? (
-                          <span
-                            className="signal-card-corner-value"
-                            style={{ fontSize: handLayout.cornerValueFontSize }}
-                          >
-                            {value}
-                          </span>
-                        ) : (
-                          <span
-                            className="signal-card-value"
-                            style={{ fontSize: handLayout.valueFontSize, lineHeight: 1 }}
-                          >
-                            {value}
-                          </span>
-                        )}
-                        {index === 0 && isRoundInteractive ? (
-                          <span className="live-badge absolute rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
-                            Live
-                          </span>
-                        ) : null}
-                      </span>
-                    </motion.button>
-                  ))}
-                  {self.hand.length === 0 ? (
-                    <div className="hand-empty rounded-[1.2rem] px-4 py-6 text-sm text-[var(--muted)]">
-                      {emptyHandBody(snapshot.phase)}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+        <div className="table-center">
+          <div className="table-label-row">
+            <span>Shared pile</span>
+            <strong>{describeTablePhase(snapshot.phase, focusRemainingMs)}</strong>
           </div>
 
-          <AnimatePresence>
-            {snapshot.phase === "focus_transition" && focusRemainingMs > 0 ? (
-              <CenterOverlay key="focus">
-                <motion.div
-                  animate={reducedMotion ? undefined : { scale: [0.94, 1.04, 0.94] }}
-                  className="focus-orb mx-auto flex size-28 items-center justify-center rounded-full"
-                  transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY }}
-                >
-                  <div className="focus-orb-core size-16 rounded-full" />
-                </motion.div>
-                <p className="mt-6 text-xs uppercase tracking-[0.38em] text-[var(--accent-soft)]">Focus</p>
-                <h2 className="mx-auto mt-2 max-w-[18rem] text-balance text-3xl font-black text-[var(--card-front)]">Start together</h2>
-                <p className="mx-auto mt-3 max-w-[21rem] text-balance text-sm leading-7 text-[var(--muted)]">
-                  Stay quiet. Let the timing settle.
-                </p>
-                <p className="mt-4 text-sm text-[var(--muted)]">{Math.ceil(focusRemainingMs / 1000)}s</p>
-              </CenterOverlay>
-            ) : null}
-            {snapshot.phase === "waiting" || (snapshot.phase === "between_levels" && !isHoldingLevelAdvanceOverlay) ? (
-              <CenterOverlay key="lobby">
-                <p className="text-xs uppercase tracking-[0.38em] text-[var(--accent-soft)]">
-                  {snapshot.phase === "waiting" ? "Waiting room" : "Next level"}
-                </p>
-                <h2 className="mt-2 text-balance text-3xl font-black text-[var(--card-front)]">
-                  {snapshot.phase === "waiting"
-                    ? other.hasJoined
-                      ? "Both players are here"
-                      : "Waiting on your partner"
-                    : `Level ${snapshot.currentLevel} ready`}
-                </h2>
-                <p className="mx-auto mt-3 max-w-[23rem] text-balance text-sm leading-7 text-[var(--muted)]">
-                  {snapshot.phase === "waiting" ? waitingOverlayBody(snapshot) : betweenLevelsBody(snapshot)}
-                </p>
-                {snapshot.phase === "waiting" && snapshot.inviteLink ? (
-                  <div className="room-overlay-actions mt-6 flex flex-wrap justify-center gap-3">
-                    <CopyInviteButton inviteLink={snapshot.inviteLink} />
-                  </div>
-                ) : null}
-                {snapshot.phase === "between_levels" ? (
-                  <button
-                    className={buttonClass("primary")}
-                    disabled={!snapshot.canStartLevel}
-                    onClick={() => {
-                      sendEvent({ type: "ready_for_level" });
-                    }}
-                    type="button"
-                  >
-                    {self.ready ? "Waiting for partner" : "Ready"}
-                  </button>
-                ) : null}
-              </CenterOverlay>
-            ) : null}
-            {snapshot.phase === "won" || snapshot.phase === "lost" ? (
-              <CenterOverlay key="result">
-                <p className="text-xs uppercase tracking-[0.38em] text-[var(--accent-soft)]">
-                  {snapshot.phase === "won" ? "Run complete" : "Out of lives"}
-                </p>
-                <h2 className="mx-auto mt-2 max-w-[20rem] text-balance text-3xl font-black text-[var(--card-front)]">
-                  {snapshot.phase === "won" ? "All 12 levels down." : "Out of lives."}
-                </h2>
-                <p className="mx-auto mt-3 max-w-[23rem] text-balance text-sm leading-7 text-[var(--muted)]">
-                  {snapshot.phase === "won"
-                    ? "Same room, fresh run. Hit rematch when you're both ready."
-                    : "Same room, back to level 1. Hit rematch when you want another run."}
-                </p>
-                <button
-                  className={buttonClass("primary")}
-                  disabled={self.ready}
-                  onClick={() => {
-                    sendEvent({ type: "request_rematch" });
-                  }}
-                  type="button"
-                >
-                  {self.ready ? "Waiting for partner" : "Rematch"}
-                </button>
-              </CenterOverlay>
-            ) : null}
-          </AnimatePresence>
-        </motion.div>
+          <TableContent
+            focusRemainingMs={focusRemainingMs}
+            isHoldingLevelClear={isHoldingLevelClear}
+            other={other}
+            reducedMotion={reducedMotion}
+            self={self}
+            sendEvent={sendEvent}
+            snapshot={snapshot}
+          />
 
-        <motion.aside
-          {...revealMotion(reducedMotion, {
-            delay: 0.1,
-            duration: 0.58,
-            x: 16,
-            y: 18
-          })}
-          className={classes(
-            "hud-rail space-y-4 transition duration-300",
-            immersivePhase && "lg:translate-x-2 lg:opacity-58 lg:hover:opacity-100 lg:focus-within:opacity-100",
-            isRoundInteractive && "lg:opacity-46"
-          )}
-        >
-          <PlayerStatusCard
-            actionLabel={snapshot.phase === "between_levels" ? (self.ready ? "Ready" : "Not ready") : "You"}
-            player={self}
-            title="You"
-          />
-          <PlayerStatusCard
-            actionLabel={other.hasJoined ? (other.connected ? "Here" : "Away") : "Invite pending"}
-            player={other}
-            title="Partner"
-          />
-          {error ? (
-            <div className="alert-panel alert-panel-danger rounded-[1.6rem] p-4 text-sm leading-7 text-[var(--card-front)]">
-              {error}
-            </div>
-          ) : null}
-          <NameEditor
-            key={`${self.seatId}-${self.displayName}`}
-            label="Your name"
-            onSubmit={(displayName) => {
-              sendEvent({ type: "set_name", displayName });
-            }}
-            value={self.displayName}
-          />
-          <div className="table-summary-card panel-surface rounded-[1.6rem] p-5">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
-              Quick read
-            </h2>
-            <dl className="table-state-list mt-4 grid gap-3 text-sm text-[var(--muted)]">
-              <div className="table-state-row flex items-center justify-between rounded-[1rem] px-3 py-2">
-                <dt>Phase</dt>
-                <dd>{tablePhaseLabel}</dd>
-              </div>
-              <div className="table-state-row flex items-center justify-between rounded-[1rem] px-3 py-2">
-                <dt>Your next</dt>
-                <dd>{lowestPlayableValue ?? "-"}</dd>
-              </div>
-              <div className="table-state-row flex items-center justify-between rounded-[1rem] px-3 py-2">
-                <dt>Partner holds</dt>
-                <dd>{countLabel(other.handCount, "card")}</dd>
-              </div>
-            </dl>
-            <div className="table-controls-note table-state-note mt-4 rounded-[1rem] px-3 py-3 text-sm leading-7 text-[var(--muted)]">
-              Pause slows the room. Scan burns the lowest card from both hands.
-            </div>
+          <div className="table-actions">
+            <button
+              className={buttonClass("secondary")}
+              disabled={!canRequestPause}
+              onClick={() => sendEvent({ type: "request_pause" })}
+              type="button"
+            >
+              Pause
+            </button>
+            <button
+              className={buttonClass("secondary")}
+              disabled={!canRequestStar}
+              onClick={() => sendEvent({ type: "request_scan" })}
+              type="button"
+            >
+              Throw star
+            </button>
           </div>
-        </motion.aside>
-      </div>
+        </div>
+
+        <HandZone
+          isRoundInteractive={isRoundInteractive && snapshot.pendingRequest === null && !connectionInterrupted}
+          onPlay={playLowestCard}
+          phase={snapshot.phase}
+          self={self}
+        />
+      </motion.section>
+
+      <footer className="room-footer">
+        <NameEditor
+          key={`${self.seatId}-${self.displayName}`}
+          onSubmit={(displayName) => sendEvent({ displayName, type: "set_name" })}
+          value={self.displayName}
+        />
+        <p className="shortcut-note">Space plays · P pauses · T throws a star · F fullscreen</p>
+        <Attribution />
+      </footer>
     </section>
+  );
+}
+
+function TableContent(props: {
+  snapshot: RoomState;
+  self: RoomState["players"]["host"];
+  other: RoomState["players"]["host"];
+  focusRemainingMs: number;
+  isHoldingLevelClear: boolean;
+  reducedMotion: boolean;
+  sendEvent: (event: ClientEvent) => void;
+}) {
+  const { snapshot } = props;
+
+  if (snapshot.phase === "waiting") {
+    return (
+      <StateMessage eyebrow="Waiting">
+        <h2>{props.other.hasJoined ? "Both players are here" : "Send one link"}</h2>
+        <p>{props.other.hasJoined ? "The room is opening." : "Your partner joins from the private invite."}</p>
+        {snapshot.inviteLink ? <CopyInviteButton inviteLink={snapshot.inviteLink} /> : null}
+      </StateMessage>
+    );
+  }
+
+  if (snapshot.phase === "between_levels" && !props.isHoldingLevelClear) {
+    const cleared = snapshot.summary?.kind === "level_cleared" ? snapshot.summary : null;
+    return (
+      <StateMessage eyebrow={cleared ? "Level clear" : "Ready"}>
+        <h2>{cleared ? `Level ${cleared.level} clear` : `Level ${snapshot.currentLevel} ready`}</h2>
+        {cleared ? (
+          <div className="reward-row">
+            {cleared.rewards.life ? <span>+1 life</span> : null}
+            {cleared.rewards.scan ? <span>+1 throwing star</span> : null}
+          </div>
+        ) : (
+          <p>Start when both players are set.</p>
+        )}
+        <button
+          className={buttonClass("primary")}
+          disabled={!snapshot.canStartLevel}
+          onClick={() => props.sendEvent({ type: "ready_for_level" })}
+          type="button"
+        >
+          {props.self.ready ? `Waiting for ${props.other.displayName}` : cleared ? `Ready for ${snapshot.currentLevel}` : "Ready"}
+        </button>
+      </StateMessage>
+    );
+  }
+
+  if (snapshot.phase === "focus_transition" && props.focusRemainingMs > 0) {
+    return (
+      <StateMessage eyebrow="Focus" variant="focus">
+        <motion.strong
+          animate={props.reducedMotion ? undefined : { scale: [0.98, 1.04, 0.98] }}
+          className="focus-count"
+          transition={{ duration: 1.8, repeat: Number.POSITIVE_INFINITY }}
+        >
+          {Math.max(1, Math.ceil(props.focusRemainingMs / 1000))}
+        </motion.strong>
+        <h2>Get quiet</h2>
+      </StateMessage>
+    );
+  }
+
+  if (snapshot.phase === "won" || snapshot.phase === "lost") {
+    return (
+      <StateMessage eyebrow={snapshot.phase === "won" ? "Run complete" : "Run lost"}>
+        <h2>{snapshot.phase === "won" ? "All 12 clear" : "Out of lives"}</h2>
+        <p>{snapshot.phase === "won" ? "Same room. Fresh run." : "Same room. Back to level 1."}</p>
+        <button
+          className={buttonClass("primary")}
+          disabled={props.self.ready}
+          onClick={() => props.sendEvent({ type: "request_rematch" })}
+          type="button"
+        >
+          {props.self.ready ? `Waiting for ${props.other.displayName}` : "Rematch"}
+        </button>
+      </StateMessage>
+    );
+  }
+
+  return (
+    <div className="live-table-content">
+      <CenterPile pile={snapshot.pile} reducedMotion={props.reducedMotion} />
+      {snapshot.pendingRequest ? (
+        <PendingRequestPanel selfSeatId={snapshot.viewerSeatId} sendEvent={props.sendEvent} snapshot={snapshot} />
+      ) : null}
+    </div>
+  );
+}
+
+function StateMessage(props: { eyebrow: string; children: ReactNode; variant?: "focus" }) {
+  return (
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className={classes("state-message", props.variant === "focus" && "state-message-focus")}
+      initial={{ opacity: 0, y: 8 }}
+      key={props.eyebrow}
+      transition={{ duration: 0.24, ease: revealEase }}
+    >
+      <span>{props.eyebrow}</span>
+      {props.children}
+    </motion.div>
+  );
+}
+
+function PartnerLane(props: { player: RoomState["players"]["host"] }) {
+  const visibleBacks = Math.min(props.player.handCount, 4);
+  return (
+    <div className="partner-lane">
+      <div>
+        <span>Partner</span>
+        <strong>{props.player.displayName}</strong>
+        <small>{describePlayerPresence(props.player)}</small>
+      </div>
+      <div className="partner-hand" aria-label={countLabel(props.player.handCount, "hidden card")}>
+        {Array.from({ length: visibleBacks }).map((_, index) => <i key={index} />)}
+        {props.player.handCount > 4 ? <b>×{props.player.handCount}</b> : null}
+        {props.player.handCount === 0 ? <em>No cards</em> : null}
+      </div>
+    </div>
+  );
+}
+
+function CenterPile(props: { pile: RoomState["pile"]; reducedMotion: boolean }) {
+  if (props.pile.length === 0) {
+    return (
+      <div className="empty-pile">
+        <i />
+        <span>No cards played yet</span>
+      </div>
+    );
+  }
+
+  const visibleCards = props.pile.slice(-4);
+  return (
+    <div className="pile-cards">
+      {visibleCards.map((card, index) => {
+        const isLatest = index === visibleCards.length - 1;
+        return (
+          <motion.div
+            animate={props.reducedMotion ? undefined : { opacity: 1, y: 0 }}
+            className={classes(
+              "pile-card",
+              isLatest && "pile-card-latest",
+              card.resolution === "misplay_discard" && "pile-card-misplay",
+              card.resolution === "scan_discard" && "pile-card-star"
+            )}
+            initial={props.reducedMotion ? undefined : { opacity: 0, y: 12 }}
+            key={`${card.value}-${card.timestamp}-${card.resolution}`}
+            layout={!props.reducedMotion}
+            transition={props.reducedMotion ? undefined : layoutSpring}
+          >
+            {card.value}
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HandZone(props: {
+  self: RoomState["players"]["host"];
+  phase: RoomState["phase"];
+  isRoundInteractive: boolean;
+  onPlay: () => void;
+}) {
+  const measureRef = useRef<HTMLDivElement | null>(null);
+  const handLayout = useHandFanLayout(measureRef, props.self.hand.length);
+
+  return (
+    <div className="hand-zone">
+      <div className="hand-label-row">
+        <div>
+          <span>Your hand</span>
+          <strong>{props.self.displayName}</strong>
+        </div>
+        <small>{countLabel(props.self.handCount, "card")}</small>
+      </div>
+      <div className="hand-measure" ref={measureRef}>
+        {props.self.hand.length > 0 ? (
+          <div
+            className="hand-fan"
+            style={{
+              minHeight: handLayout.cardHeight + 16,
+              width: handLayout.totalWidth || undefined
+            }}
+          >
+            {props.self.hand.map((value, index) => {
+              const isActive = index === 0;
+              const style = {
+                "--card-font-size": `${handLayout.valueFontSize}px`,
+                height: handLayout.cardHeight,
+                marginLeft: index === 0 ? 0 : handLayout.step - handLayout.cardWidth,
+                width: handLayout.cardWidth,
+                zIndex: props.self.hand.length - index
+              } as CSSProperties;
+              return (
+                <motion.button
+                  className={classes("hand-card", isActive ? "hand-card-active" : "hand-card-muted")}
+                  disabled={!isActive || !props.isRoundInteractive}
+                  key={value}
+                  layout
+                  onClick={props.onPlay}
+                  style={style}
+                  transition={layoutSpring}
+                  type="button"
+                  whileTap={props.isRoundInteractive && isActive ? { scale: 0.97, y: 4 } : undefined}
+                >
+                  <span className={handLayout.useCornerValue && !isActive ? "card-corner-value" : ""}>{value}</span>
+                  {isActive && props.isRoundInteractive ? <small>Play</small> : null}
+                </motion.button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-hand">
+            <i />
+            <span>{props.phase === "in_round" || props.phase === "paused" ? "Hand clear" : "No cards yet"}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PendingRequestPanel(props: {
+  snapshot: RoomState;
+  selfSeatId: SeatId;
+  sendEvent: (event: ClientEvent) => void;
+}) {
+  const pending = props.snapshot.pendingRequest;
+  if (!pending) {
+    return null;
+  }
+
+  const isAwaitingViewer = !pending.approvals[props.selfSeatId];
+  const isPause = pending.kind === "pause";
+  const title = isPause
+    ? isAwaitingViewer ? "Pause here?" : "Round paused"
+    : isAwaitingViewer ? "Use one throwing star?" : "Throwing star requested";
+  const body = isAwaitingViewer
+    ? isPause
+      ? "Both players resume together."
+      : "Discard the lowest card from both hands."
+    : `Waiting for ${props.snapshot.players[pending.requesterSeatId === "host" ? "guest" : "host"].displayName}.`;
+
+  return (
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className="request-sheet"
+      initial={{ opacity: 0, y: 10 }}
+      transition={{ duration: 0.2, ease: revealEase }}
+    >
+      <span>{isPause ? "Pause" : "Throwing star"}</span>
+      <h3>{title}</h3>
+      <p>{body}</p>
+      {isAwaitingViewer ? (
+        <div>
+          {isPause ? (
+            <button className={buttonClass("primary")} onClick={() => props.sendEvent({ type: "resume_round" })} type="button">
+              Resume
+            </button>
+          ) : (
+            <>
+              <button className={buttonClass("primary")} onClick={() => props.sendEvent({ accepted: true, type: "respond_scan" })} type="button">
+                Throw star
+              </button>
+              <button className={buttonClass("text")} onClick={() => props.sendEvent({ accepted: false, type: "respond_scan" })} type="button">
+                Keep it
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+    </motion.div>
+  );
+}
+
+function ConnectionBadge(props: { state: ConnectionState }) {
+  return (
+    <div className={classes("connection-badge", props.state === "open" && "connection-badge-open")}>
+      <i />
+      <span>{describeConnectionState(props.state)}</span>
+    </div>
+  );
+}
+
+function Resource(props: { label: string; value: number }) {
+  return (
+    <div className="resource-readout">
+      <span>{props.label}</span>
+      <strong>{props.value}</strong>
+    </div>
+  );
+}
+
+function CopyInviteButton(props: { inviteLink: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className={buttonClass("secondary")}
+      onClick={() => {
+        void navigator.clipboard.writeText(props.inviteLink);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      }}
+      type="button"
+    >
+      {copied ? "Copied" : "Copy invite"}
+    </button>
+  );
+}
+
+function NameEditor(props: { value: string; onSubmit: (nextValue: string) => void }) {
+  const [draft, setDraft] = useState(props.value);
+  return (
+    <form
+      className="name-editor"
+      onSubmit={(event) => {
+        event.preventDefault();
+        props.onSubmit(draft);
+      }}
+    >
+      <label htmlFor="player-name">Playing as</label>
+      <input
+        id="player-name"
+        maxLength={24}
+        onChange={(event) => setDraft(event.target.value)}
+        value={draft}
+      />
+      <button className={buttonClass("text")} type="submit">Save</button>
+    </form>
   );
 }
 
@@ -1780,7 +979,6 @@ function useRoomSession(roomId: string, token: string | null) {
   const setError = useRoomStore((state) => state.setError);
   const reset = useRoomStore((state) => state.reset);
   const [connectNonce, setConnectNonce] = useState(0);
-
   const socketRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<number | null>(null);
   const requestRef = useRef(0);
@@ -1800,36 +998,38 @@ function useRoomSession(roomId: string, token: string | null) {
       retryRef.current = null;
     }
 
-    const connectionMode: ConnectionState = connectNonce === 0 ? "bootstrapping" : "reconnecting";
-    setConnectionState(connectionMode);
+    setConnectionState(connectNonce === 0 ? "bootstrapping" : "reconnecting");
     setError(null);
 
     const bootstrapAndConnect = async () => {
       try {
         const response = await fetch(`/api/rooms/${roomId}/bootstrap`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json"
-          },
           body: JSON.stringify({
+            appVersion: APP_VERSION,
+            protocolVersion: PROTOCOL_VERSION,
             token
-          })
+          }),
+          headers: { "content-type": "application/json" },
+          method: "POST"
         });
         if (!response.ok) {
           if (response.status === 401 || response.status === 404) {
             clearStoredRoomToken(roomId);
           }
-          throw new Error(response.status === 401 ? "Invite link is invalid or expired." : "Couldn't join the room.");
+          throw new Error(
+            response.status === 400
+              ? "App version mismatch. Refresh the page, then reopen the invite."
+              : response.status === 401
+                ? "Invite link is invalid or expired."
+                : "Couldn't join the room."
+          );
         }
         const payload = bootstrapResponseSchema.parse(await readJsonOrThrow(response));
         if (cancelled || currentAttempt !== requestRef.current) {
           return;
         }
 
-        startTransition(() => {
-          setBootstrap(payload);
-        });
-
+        startTransition(() => setBootstrap(payload));
         setConnectionState("connecting");
         const protocol = window.location.protocol === "https:" ? "wss" : "ws";
         const socket = new WebSocket(`${protocol}://${window.location.host}${payload.wsPath}`);
@@ -1840,21 +1040,15 @@ function useRoomSession(roomId: string, token: string | null) {
             return;
           }
           setConnectionState("open");
-          socket.send(
-            JSON.stringify(
-              clientEventSchema.parse({
-                type: "join_room",
-                lastEventId: useRoomStore.getState().snapshot?.eventId ?? null
-              })
-            )
-          );
+          socket.send(JSON.stringify(clientEventSchema.parse({
+            lastEventId: useRoomStore.getState().snapshot?.eventId ?? null,
+            type: "join_room"
+          })));
         });
 
         socket.addEventListener("message", (event) => {
           const parsed = serverEventSchema.parse(JSON.parse(String(event.data)));
-          startTransition(() => {
-            applyServerEvent(parsed);
-          });
+          startTransition(() => applyServerEvent(parsed));
         });
 
         socket.addEventListener("close", () => {
@@ -1862,9 +1056,7 @@ function useRoomSession(roomId: string, token: string | null) {
             return;
           }
           setConnectionState("closed");
-          retryRef.current = window.setTimeout(() => {
-            setConnectNonce((value) => value + 1);
-          }, 1000);
+          retryRef.current = window.setTimeout(() => setConnectNonce((value) => value + 1), 1000);
         });
 
         socket.addEventListener("error", () => {
@@ -1872,9 +1064,7 @@ function useRoomSession(roomId: string, token: string | null) {
             return;
           }
           setConnectionState("error");
-          retryRef.current = window.setTimeout(() => {
-            setConnectNonce((value) => value + 1);
-          }, 1000);
+          retryRef.current = window.setTimeout(() => setConnectNonce((value) => value + 1), 1000);
         });
       } catch (caughtError) {
         if (cancelled || currentAttempt !== requestRef.current) {
@@ -1903,337 +1093,16 @@ function useRoomSession(roomId: string, token: string | null) {
   const sendEvent = (event: ClientEvent) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setError("Connection dropped. Reconnecting...");
+      setError("Connection dropped. Reconnecting…");
       return;
     }
     socket.send(JSON.stringify(clientEventSchema.parse(event)));
   };
 
-  const reconnectNow = () => {
-    setConnectNonce((value) => value + 1);
-  };
-
   return {
-    sendEvent,
-    reconnectNow
+    reconnectNow: () => setConnectNonce((value) => value + 1),
+    sendEvent
   };
-}
-
-function ConnectionPill(props: { state: ConnectionState }) {
-  return (
-    <div className={connectionPillClass(props.state)}>
-      {describeConnectionState(props.state)}
-    </div>
-  );
-}
-
-function StatPill(props: { label: string; value: number; tone: "danger" | "warning" }) {
-  return (
-    <div className={statPillClass(props.tone)}>
-      <span>{props.label}</span> <span className="metric-pill-value font-black">{props.value}</span>
-    </div>
-  );
-}
-
-function CopyInviteButton(props: { inviteLink: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      className={buttonClass("secondary")}
-      onClick={() => {
-        void navigator.clipboard.writeText(props.inviteLink);
-        setCopied(true);
-        window.setTimeout(() => {
-          setCopied(false);
-        }, 1200);
-      }}
-      type="button"
-    >
-      {copied ? "Copied" : "Copy invite"}
-    </button>
-  );
-}
-
-function PlayerRail(props: {
-  player: RoomState["players"]["host"];
-  placement: "top" | "bottom";
-  className?: string;
-}) {
-  return (
-    <div
-      className={classes(
-        "player-rail flex items-center justify-between gap-4 rounded-[1.7rem] px-4 py-4",
-        props.className
-      )}
-    >
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.24em] text-[var(--accent-soft)]">
-          {props.player.displayName}
-        </p>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          {describePlayerPresence(props.player)}
-        </p>
-      </div>
-      <div className="flex gap-2">
-        {Array.from({ length: Math.max(props.player.handCount, 1) }).map((_, index) => (
-          <div
-            className={`h-16 w-11 rounded-[0.95rem] border ${
-              props.player.handCount === 0
-                ? "border-white/10 bg-transparent"
-                : "landing-card-back border-[rgba(255,245,224,0.08)]"
-            }`}
-            key={`${props.placement}-${index}`}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CenterPile(props: {
-  pile: RoomState["pile"];
-  phase: RoomState["phase"];
-  reducedMotion: boolean;
-}) {
-  return (
-    <div className="pile-grid flex min-h-72 flex-wrap items-center justify-center gap-3 content-center">
-      {props.pile.slice(-18).map((card) => (
-        <motion.div
-          animate={props.reducedMotion ? undefined : { opacity: 1, y: 0 }}
-          className={`signal-pile-card flex h-20 w-[3.8rem] items-center justify-center rounded-[1rem] border text-xl font-black ${
-            card.resolution === "played"
-              ? "border-[var(--card-edge)] bg-[var(--card-front)] text-[var(--card-ink)]"
-              : card.resolution === "misplay_discard"
-                ? "border-[var(--danger)]/35 bg-[var(--danger)]/12 text-[var(--card-front)]"
-                : "border-[var(--warning)]/35 bg-[var(--warning)]/12 text-[var(--card-front)]"
-          }`}
-          initial={props.reducedMotion ? undefined : { opacity: 0, y: 10 }}
-          key={`${card.value}-${card.timestamp}-${card.resolution}`}
-          layout={!props.reducedMotion}
-          transition={props.reducedMotion ? undefined : layoutSpring}
-        >
-          {card.value}
-        </motion.div>
-      ))}
-      {props.pile.length === 0 ? (
-        <div className="empty-pile-state">
-          <div className="empty-pile-card" />
-          <p className="mt-3 text-sm text-[var(--muted)]">{emptyPileBody(props.phase)}</p>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PendingRequestPanel(props: {
-  snapshot: RoomState;
-  selfSeatId: SeatId;
-  sendEvent: (event: ClientEvent) => void;
-}) {
-  const pending = props.snapshot.pendingRequest;
-  const reducedMotion = Boolean(useReducedMotion());
-
-  if (!pending) {
-    return null;
-  }
-
-  const isAwaitingViewer = !pending.approvals[props.selfSeatId];
-  const requestLabel = pending.kind === "pause" ? "Pause" : "Scan";
-  const title =
-    pending.kind === "pause"
-      ? isAwaitingViewer
-        ? "Pause here?"
-        : "Pause requested"
-      : isAwaitingViewer
-        ? "Spend one scan?"
-        : "Scan requested";
-  const body =
-    pending.kind === "pause"
-      ? isAwaitingViewer
-        ? "Both players need to confirm before the focus cue runs again."
-        : "Waiting on your partner to answer."
-      : isAwaitingViewer
-        ? "This burns the lowest card from both hands."
-        : "Waiting on your partner to answer.";
-
-  return (
-    <motion.div
-      animate={reducedMotion ? undefined : { opacity: 1, y: 0 }}
-      className={classes(
-        "request-panel request-panel-overlay request-panel-warning text-[var(--card-front)]",
-        isAwaitingViewer ? "request-panel-overlay-interactive" : "request-panel-overlay-passive"
-      )}
-      initial={reducedMotion ? undefined : { opacity: 0, y: -8 }}
-      transition={reducedMotion ? undefined : {
-        duration: 0.24,
-        ease: revealEase
-      }}
-    >
-      <div className="request-panel-main">
-        <div className="request-panel-meta-row">
-          <p className="request-panel-kicker">{requestLabel}</p>
-          <div
-            className={classes(
-              "request-panel-state",
-              isAwaitingViewer ? "request-panel-state-pending" : "request-panel-state-waiting"
-            )}
-          >
-            {isAwaitingViewer ? "Your call" : "Waiting"}
-          </div>
-        </div>
-        <p className="request-panel-title">{title}</p>
-        <p className="request-panel-copy">{body}</p>
-      </div>
-      {isAwaitingViewer ? (
-        <div className="request-panel-actions">
-          {pending.kind === "pause" ? (
-            <button
-              className={`${buttonClass("primary")} flex-1`}
-              onClick={() => {
-                props.sendEvent({ type: "resume_round" });
-              }}
-              type="button"
-            >
-              Resume
-            </button>
-          ) : (
-            <>
-              <button
-                className={`${buttonClass("primary")} flex-1`}
-                onClick={() => {
-                  props.sendEvent({ type: "respond_scan", accepted: true });
-                }}
-                type="button"
-              >
-                Spend scan
-              </button>
-              <button
-                className={`${buttonClass("ghost")} flex-1`}
-                onClick={() => {
-                  props.sendEvent({ type: "respond_scan", accepted: false });
-                }}
-                type="button"
-              >
-                Skip
-              </button>
-            </>
-          )}
-        </div>
-      ) : null}
-    </motion.div>
-  );
-}
-
-function CenterOverlay(props: { children: ReactNode }) {
-  const reducedMotion = Boolean(useReducedMotion());
-
-  return (
-    <motion.div
-      animate={{ opacity: 1 }}
-      className="overlay-backdrop"
-      exit={{ opacity: 0 }}
-      initial={{ opacity: 0 }}
-      transition={reducedMotion ? undefined : {
-        duration: 0.24,
-        ease: revealEase
-      }}
-    >
-      <motion.div
-        animate={reducedMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
-        className="overlay-panel panel-surface rounded-[1.85rem] px-8 py-10 text-center"
-        exit={reducedMotion ? undefined : { opacity: 0, y: 10, scale: 0.985 }}
-        initial={reducedMotion ? undefined : { opacity: 0, y: 14, scale: 0.985 }}
-        transition={reducedMotion ? undefined : {
-          duration: 0.32,
-          ease: revealEase
-        }}
-      >
-        {props.children}
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function PlayerStatusCard(props: {
-  title: string;
-  actionLabel: string;
-  player: RoomState["players"]["host"];
-}) {
-  const connectionLabel = props.player.connected
-    ? "Here"
-    : props.player.hasJoined
-      ? "Away"
-      : "Waiting";
-  const chipToneClass = props.title === "You"
-    ? "status-chip-self"
-    : props.player.connected
-      ? "status-chip-connected"
-      : props.player.hasJoined
-        ? "status-chip-rejoining"
-        : "status-chip-pending";
-
-  return (
-    <div className="status-card panel-surface rounded-[1.6rem] p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-[var(--accent-soft)]">
-            {props.title}
-          </p>
-          <h2 className="mt-2 text-xl font-bold text-[var(--card-front)]">
-            {props.player.displayName}
-          </h2>
-        </div>
-        <div className={classes("status-chip rounded-full px-3 py-1 text-xs uppercase tracking-[0.18em]", chipToneClass)}>
-          {props.actionLabel}
-        </div>
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <div className="status-data-block rounded-[1rem] px-3 py-3">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--accent-soft)]">Connection</p>
-          <p className="mt-2 text-sm text-[var(--card-front)]">{connectionLabel}</p>
-        </div>
-        <div className="status-data-block rounded-[1rem] px-3 py-3">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-[var(--accent-soft)]">Cards</p>
-          <p className="mt-2 text-sm text-[var(--card-front)]">{countLabel(props.player.handCount, "card")}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NameEditor(props: {
-  value: string;
-  label: string;
-  onSubmit: (nextValue: string) => void;
-}) {
-  const [draft, setDraft] = useState(props.value);
-
-  return (
-    <form
-      className="name-editor rounded-[1.2rem] p-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        props.onSubmit(draft);
-      }}
-    >
-      <label className="block text-xs uppercase tracking-[0.22em] text-[var(--muted)]">
-        {props.label}
-      </label>
-      <div className="mt-2 flex gap-2">
-        <input
-          className="name-input rounded-full px-4 py-2 ring-0"
-          maxLength={24}
-          onChange={(event) => {
-            setDraft(event.target.value);
-          }}
-          value={draft}
-        />
-        <button className={buttonClass("secondary")} type="submit">
-          Save
-        </button>
-      </div>
-    </form>
-  );
 }
 
 async function toggleFullscreen(): Promise<void> {
@@ -2243,4 +1112,3 @@ async function toggleFullscreen(): Promise<void> {
   }
   await document.exitFullscreen();
 }
-

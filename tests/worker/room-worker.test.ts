@@ -10,6 +10,7 @@ import {
   bootstrapResponseSchema,
   createRoomResponseSchema
 } from "@shared/protocol";
+import { APP_VERSION, PROTOCOL_VERSION } from "@shared/version";
 
 interface TestEnv {
   ROOMS: DurableObjectNamespace;
@@ -43,6 +44,8 @@ async function bootstrap(roomId: string, token: string) {
       "content-type": "application/json"
     },
     body: JSON.stringify({
+      appVersion: APP_VERSION,
+      protocolVersion: PROTOCOL_VERSION,
       token
     })
   });

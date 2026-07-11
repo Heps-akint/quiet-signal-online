@@ -50,7 +50,7 @@ function bannerFromEvent(event: ServerEvent): BannerState | null {
     case "misplay_resolved":
       return {
         celebration: null,
-        tone: "warning",
+        tone: "danger",
         text: `Life lost. ${event.card} landed too early.`
       };
     case "pause_state_changed":
@@ -65,9 +65,9 @@ function bannerFromEvent(event: ServerEvent): BannerState | null {
         tone: event.accepted ? "neutral" : "warning",
         text: event.resolved
           ? event.accepted
-            ? "Scan spent."
-            : "Scan skipped."
-          : "Scan requested."
+            ? "Throwing star used."
+            : "Throwing star kept."
+          : "Throwing star requested."
       };
     case "level_cleared":
       return {

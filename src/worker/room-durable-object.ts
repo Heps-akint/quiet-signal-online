@@ -1,5 +1,6 @@
 import { DurableObject as DurableObjectBase } from "cloudflare:workers";
 import { z } from "zod";
+import { APP_VERSION, PROTOCOL_VERSION } from "@shared/version";
 import {
   bootstrapRequestSchema,
   bootstrapResponseSchema,
@@ -325,6 +326,8 @@ export class RoomDurableObject extends DurableObjectBase<RoomDurableObjectEnv> {
 
     return jsonResponse(
       bootstrapResponseSchema.parse({
+        appVersion: APP_VERSION,
+        protocolVersion: PROTOCOL_VERSION,
         roomId: document.engine.roomId,
         seatId,
         canReconnect: true,

@@ -135,6 +135,8 @@ async function captureGameplayAssets(browser) {
   await clearNameField(hostPage, "Mira");
   await clearNameField(guestPage, "Jonas");
   await waitForTimeout(300);
+  await hostPage.evaluate(() => window.scrollTo(0, 0));
+  await guestPage.evaluate(() => window.scrollTo(0, 0));
 
   await hostPage.screenshot({
     path: path.join(docsAssetDir, "readme-room-ready.png")

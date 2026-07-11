@@ -643,13 +643,13 @@ export function resumeRound(state: RoomEngineState, seatId: SeatId, now: number)
 export function requestScan(state: RoomEngineState, seatId: SeatId, now: number): EngineUpdate {
   const advancedState = maybeAdvanceTimedPhase(state, now);
   if (advancedState.phase !== "in_round") {
-    throw new Error("Scan is only available during a live round.");
+    throw new Error("A throwing star is only available during a live round.");
   }
   if (advancedState.pendingRequest !== null) {
     throw new Error("Another request is already pending.");
   }
   if (advancedState.scans <= 0) {
-    throw new Error("No scan left.");
+    throw new Error("No throwing star left.");
   }
 
   return {
@@ -676,7 +676,7 @@ export function respondScan(
 ): EngineUpdate {
   const advancedState = maybeAdvanceTimedPhase(state, now);
   if (advancedState.phase !== "in_round" || advancedState.pendingRequest?.kind !== "scan") {
-    throw new Error("No scan vote is active.");
+    throw new Error("No throwing-star vote is active.");
   }
 
   if (!accepted) {
@@ -740,7 +740,7 @@ export function respondScan(
       level: advancedState.currentLevel,
       discardedCards,
       scansRemaining: advancedState.scans - 1,
-      message: "Scan spent."
+      message: "Throwing star used."
     }
   });
 

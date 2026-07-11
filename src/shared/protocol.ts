@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { APP_VERSION, PROTOCOL_VERSION } from "@shared/version";
 
 export const MAX_LEVEL = 12;
 export const STARTING_LIVES = 2;
@@ -180,11 +181,15 @@ export const createRoomResponseSchema = z.object({
 export type CreateRoomResponse = z.infer<typeof createRoomResponseSchema>;
 
 export const bootstrapRequestSchema = z.object({
-  token: inviteTokenSchema
+  token: inviteTokenSchema,
+  appVersion: z.literal(APP_VERSION),
+  protocolVersion: z.literal(PROTOCOL_VERSION)
 });
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;
 
 export const bootstrapResponseSchema = z.object({
+  appVersion: z.literal(APP_VERSION),
+  protocolVersion: z.literal(PROTOCOL_VERSION),
   roomId: z.string().min(1),
   seatId: seatIdSchema,
   canReconnect: z.boolean(),

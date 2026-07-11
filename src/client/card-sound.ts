@@ -5,7 +5,7 @@ interface CardSoundEngine {
   unlock: () => Promise<void>;
   tap: () => void;
   move: (options?: { dealt?: boolean }) => void;
-  place: (options?: { discard?: boolean; count?: number }) => void;
+  place: (options?: { discard?: boolean; star?: boolean; count?: number }) => void;
   celebrate: (options?: { grand?: boolean }) => void;
   warnLifeLoss: () => void;
   mournLoss: () => void;
@@ -19,7 +19,7 @@ export type RoomSoundCue =
   | "game_lost"
   | null;
 
-const ALERT_CUE_GAIN_MULTIPLIER = 1.62;
+const ALERT_CUE_GAIN_MULTIPLIER = 1.22;
 
 export function getRoomSoundCue(
   previousSnapshot: RoomState | null,
@@ -48,14 +48,48 @@ export function getRoomSoundCue(
   return null;
 }
 
+function seededNoise(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}
+
 function createNoiseBuffer(audioContext: AudioContext): AudioBuffer {
   const sampleRate = audioContext.sampleRate;
-  const frameCount = Math.max(1, Math.floor(sampleRate * 0.12));
+  const frameCount = Math.max(1, Math.floor(sampleRate * 0.65));
   const buffer = audioContext.createBuffer(1, frameCount, sampleRate);
   const channel = buffer.getChannelData(0);
+  const random = seededNoise(0x51_47_4c_45);
+  let smoothed = 0;
 
   for (let index = 0; index < frameCount; index += 1) {
-    channel[index] = (Math.random() * 2 - 1) * (1 - index / frameCount);
+    const white = random() * 2 - 1;
+    smoothed = smoothed * 0.72 + white * 0.28;
+    channel[index] = smoothed;
+  }
+
+  return buffer;
+}
+
+function createRoomImpulse(audioContext: AudioContext): AudioBuffer {
+  const sampleRate = audioContext.sampleRate;
+  const frameCount = Math.max(1, Math.floor(sampleRate * 0.48));
+  const buffer = audioContext.createBuffer(2, frameCount, sampleRate);
+
+  for (let channelIndex = 0; channelIndex < buffer.numberOfChannels; channelIndex += 1) {
+    const channel = buffer.getChannelData(channelIndex);
+    const random = seededNoise(0x4d_49_4e_44 + channelIndex * 97);
+    let smoothed = 0;
+
+    for (let index = 0; index < frameCount; index += 1) {
+      const progress = index / frameCount;
+      const decay = Math.pow(1 - progress, 3.6);
+      const white = random() * 2 - 1;
+      smoothed = smoothed * 0.62 + white * 0.38;
+      channel[index] = smoothed * decay * 0.52;
+    }
   }
 
   return buffer;
@@ -67,8 +101,11 @@ function alertGain(gain: number): number {
 
 function createCardSoundEngine(): CardSoundEngine {
   let audioContext: AudioContext | null = null;
+  let mixBus: GainNode | null = null;
   let masterGain: GainNode | null = null;
+  let reverbInput: GainNode | null = null;
   let noiseBuffer: AudioBuffer | null = null;
+  let warmWave: PeriodicWave | null = null;
 
   function getAudioContext(): AudioContext | null {
     if (typeof window === "undefined") {
@@ -85,15 +122,68 @@ function createCardSoundEngine(): CardSoundEngine {
     }
 
     audioContext = new AudioContextCtor();
+
+    mixBus = audioContext.createGain();
+    const lowShelf = audioContext.createBiquadFilter();
+    const highShelf = audioContext.createBiquadFilter();
+    const compressor = audioContext.createDynamicsCompressor();
     masterGain = audioContext.createGain();
-    masterGain.gain.value = 0.34;
+
+    lowShelf.type = "lowshelf";
+    lowShelf.frequency.value = 190;
+    lowShelf.gain.value = 2.4;
+
+    highShelf.type = "highshelf";
+    highShelf.frequency.value = 2800;
+    highShelf.gain.value = -2.8;
+
+    compressor.threshold.value = -21;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 3.2;
+    compressor.attack.value = 0.008;
+    compressor.release.value = 0.2;
+
+    masterGain.gain.value = 0.48;
+    mixBus.connect(lowShelf);
+    lowShelf.connect(highShelf);
+    highShelf.connect(compressor);
+    compressor.connect(masterGain);
     masterGain.connect(audioContext.destination);
+
+    reverbInput = audioContext.createGain();
+    const convolver = audioContext.createConvolver();
+    const reverbTone = audioContext.createBiquadFilter();
+    const reverbGain = audioContext.createGain();
+    convolver.buffer = createRoomImpulse(audioContext);
+    reverbTone.type = "lowpass";
+    reverbTone.frequency.value = 2100;
+    reverbGain.gain.value = 0.26;
+    reverbInput.connect(convolver);
+    convolver.connect(reverbTone);
+    reverbTone.connect(reverbGain);
+    reverbGain.connect(compressor);
+
+    warmWave = audioContext.createPeriodicWave(
+      new Float32Array([0, 0, 0, 0, 0, 0]),
+      new Float32Array([0, 1, 0.3, 0.11, 0.045, 0.018]),
+      { disableNormalization: false }
+    );
     noiseBuffer = createNoiseBuffer(audioContext);
     return audioContext;
   }
 
-  function getMasterGain(): GainNode | null {
-    return masterGain;
+  function connectVoice(node: AudioNode, reverbAmount: number) {
+    if (!audioContext || !mixBus) {
+      return;
+    }
+
+    node.connect(mixBus);
+    if (reverbAmount > 0 && reverbInput) {
+      const send = audioContext.createGain();
+      send.gain.value = reverbAmount;
+      node.connect(send);
+      send.connect(reverbInput);
+    }
   }
 
   function pulseTone(options: {
@@ -105,11 +195,12 @@ function createCardSoundEngine(): CardSoundEngine {
     startAt?: number;
     lowpassFrequency?: number;
     resonance?: number;
+    reverb?: number;
+    detune?: number;
     type?: OscillatorType;
   }) {
     const context = getAudioContext();
-    const output = getMasterGain();
-    if (!context || !output) {
+    if (!context || !mixBus) {
       return;
     }
 
@@ -118,8 +209,13 @@ function createCardSoundEngine(): CardSoundEngine {
     const gain = context.createGain();
     const filter = context.createBiquadFilter();
 
-    oscillator.type = options.type ?? "triangle";
+    if ((options.type ?? "triangle") === "triangle" && warmWave) {
+      oscillator.setPeriodicWave(warmWave);
+    } else {
+      oscillator.type = options.type ?? "sine";
+    }
     oscillator.frequency.setValueAtTime(options.frequency, startAt);
+    oscillator.detune.setValueAtTime(options.detune ?? 0, startAt);
     oscillator.frequency.exponentialRampToValueAtTime(
       Math.max(60, options.endFrequency),
       startAt + options.duration
@@ -130,12 +226,14 @@ function createCardSoundEngine(): CardSoundEngine {
     filter.Q.value = options.resonance ?? 0.8;
 
     gain.gain.setValueAtTime(0.0001, startAt);
-    gain.gain.linearRampToValueAtTime(options.gain, startAt + (options.attack ?? 0.01));
+    const attack = options.attack ?? 0.012;
+    gain.gain.linearRampToValueAtTime(options.gain, startAt + attack);
+    gain.gain.setValueAtTime(options.gain, startAt + Math.min(options.duration * 0.38, attack + 0.025));
     gain.gain.exponentialRampToValueAtTime(0.0001, startAt + options.duration);
 
     oscillator.connect(filter);
     filter.connect(gain);
-    gain.connect(output);
+    connectVoice(gain, options.reverb ?? 0.035);
 
     oscillator.start(startAt);
     oscillator.stop(startAt + options.duration + 0.02);
@@ -146,11 +244,12 @@ function createCardSoundEngine(): CardSoundEngine {
     duration: number;
     highpass: number;
     lowpass: number;
+    attack?: number;
+    reverb?: number;
     startAt?: number;
   }) {
     const context = getAudioContext();
-    const output = getMasterGain();
-    if (!context || !output || !noiseBuffer) {
+    if (!context || !mixBus || !noiseBuffer) {
       return;
     }
 
@@ -169,13 +268,13 @@ function createCardSoundEngine(): CardSoundEngine {
     lowpass.frequency.setValueAtTime(options.lowpass, startAt);
 
     gain.gain.setValueAtTime(0.0001, startAt);
-    gain.gain.linearRampToValueAtTime(options.gain, startAt + 0.008);
+    gain.gain.linearRampToValueAtTime(options.gain, startAt + (options.attack ?? 0.006));
     gain.gain.exponentialRampToValueAtTime(0.0001, startAt + options.duration);
 
     source.connect(bandpass);
     bandpass.connect(lowpass);
     lowpass.connect(gain);
-    gain.connect(output);
+    connectVoice(gain, options.reverb ?? 0.018);
 
     source.start(startAt);
     source.stop(startAt + options.duration + 0.03);
@@ -191,8 +290,9 @@ function createCardSoundEngine(): CardSoundEngine {
     pulseTone({
       ...options,
       attack: 0.022,
-      lowpassFrequency: 1300,
+      lowpassFrequency: 950,
       resonance: 0.5,
+      reverb: 0.06,
       type: "sine"
     });
   }
@@ -216,19 +316,32 @@ function createCardSoundEngine(): CardSoundEngine {
 
       const startAt = context.currentTime + 0.005;
       burstNoise({
-        gain: 0.09,
-        duration: 0.05,
-        highpass: 700,
-        lowpass: 2500,
+        gain: 0.052,
+        duration: 0.045,
+        highpass: 260,
+        lowpass: 1450,
+        reverb: 0.008,
         startAt
       });
       pulseTone({
-        frequency: 560,
-        endFrequency: 340,
-        gain: 0.018,
-        duration: 0.08,
+        frequency: 185,
+        endFrequency: 118,
+        gain: 0.052,
+        duration: 0.115,
+        lowpassFrequency: 760,
+        reverb: 0.012,
         startAt,
         type: "triangle"
+      });
+      pulseTone({
+        frequency: 340,
+        endFrequency: 245,
+        gain: 0.012,
+        duration: 0.075,
+        lowpassFrequency: 1250,
+        reverb: 0.01,
+        startAt: startAt + 0.004,
+        type: "sine"
       });
     },
     move: (options) => {
@@ -240,19 +353,23 @@ function createCardSoundEngine(): CardSoundEngine {
       const startAt = context.currentTime + 0.01;
       const dealt = Boolean(options?.dealt);
       burstNoise({
-        gain: dealt ? 0.08 : 0.06,
-        duration: dealt ? 0.09 : 0.07,
-        highpass: 420,
-        lowpass: dealt ? 1700 : 1450,
+        gain: dealt ? 0.052 : 0.04,
+        duration: dealt ? 0.11 : 0.085,
+        highpass: 180,
+        lowpass: dealt ? 1200 : 980,
+        attack: 0.012,
+        reverb: 0.018,
         startAt
       });
       pulseTone({
-        frequency: dealt ? 310 : 260,
-        endFrequency: dealt ? 220 : 180,
-        gain: dealt ? 0.02 : 0.014,
-        duration: dealt ? 0.14 : 0.1,
+        frequency: dealt ? 168 : 146,
+        endFrequency: dealt ? 122 : 108,
+        gain: dealt ? 0.032 : 0.024,
+        duration: dealt ? 0.17 : 0.13,
+        lowpassFrequency: 820,
+        reverb: 0.025,
         startAt,
-        type: "sine"
+        type: "triangle"
       });
     },
     place: (options) => {
@@ -263,29 +380,70 @@ function createCardSoundEngine(): CardSoundEngine {
 
       const startAt = context.currentTime + 0.01;
       const discard = Boolean(options?.discard);
+      const star = Boolean(options?.star);
       const count = Math.max(1, options?.count ?? 1);
-      const layeredGain = Math.min(0.018 + count * 0.004, 0.032);
+      const layeredGain = Math.min(0.048 + count * 0.006, 0.072);
+
+      if (star) {
+        burstNoise({
+          gain: 0.038,
+          duration: 0.14,
+          highpass: 280,
+          lowpass: 1550,
+          attack: 0.022,
+          reverb: 0.05,
+          startAt
+        });
+        pulseTone({
+          frequency: 196,
+          endFrequency: 220,
+          gain: 0.032,
+          duration: 0.24,
+          attack: 0.025,
+          lowpassFrequency: 1050,
+          reverb: 0.09,
+          startAt,
+          type: "triangle"
+        });
+        pulseTone({
+          frequency: 293.66,
+          endFrequency: 329.63,
+          gain: 0.018,
+          duration: 0.28,
+          attack: 0.03,
+          lowpassFrequency: 1350,
+          reverb: 0.11,
+          startAt: startAt + 0.045,
+          type: "sine"
+        });
+        return;
+      }
 
       burstNoise({
-        gain: discard ? 0.06 : 0.075,
-        duration: discard ? 0.07 : 0.09,
-        highpass: discard ? 480 : 360,
-        lowpass: discard ? 1600 : 1300,
+        gain: discard ? 0.04 : 0.05,
+        duration: discard ? 0.08 : 0.095,
+        highpass: discard ? 250 : 180,
+        lowpass: discard ? 1300 : 1050,
+        reverb: 0.014,
         startAt
       });
       pulseTone({
-        frequency: discard ? 240 : 200,
-        endFrequency: discard ? 160 : 130,
+        frequency: discard ? 158 : 132,
+        endFrequency: discard ? 105 : 82,
         gain: layeredGain,
-        duration: discard ? 0.12 : 0.16,
+        duration: discard ? 0.15 : 0.19,
+        lowpassFrequency: 720,
+        reverb: 0.025,
         startAt,
         type: "triangle"
       });
       pulseTone({
-        frequency: discard ? 370 : 310,
-        endFrequency: discard ? 250 : 220,
-        gain: discard ? 0.008 : 0.01,
-        duration: 0.11,
+        frequency: discard ? 285 : 240,
+        endFrequency: discard ? 205 : 170,
+        gain: discard ? 0.01 : 0.014,
+        duration: 0.12,
+        lowpassFrequency: 1200,
+        reverb: 0.02,
         startAt: startAt + 0.012,
         type: "sine"
       });
@@ -300,52 +458,48 @@ function createCardSoundEngine(): CardSoundEngine {
       const grand = Boolean(options?.grand);
       const notes = grand
         ? [
-            { duration: 0.28, endFrequency: 510, frequency: 523.25, gain: alertGain(0.03), startAt },
-            { duration: 0.32, endFrequency: 639, frequency: 659.25, gain: alertGain(0.028), startAt: startAt + 0.12 },
-            { duration: 0.38, endFrequency: 760, frequency: 783.99, gain: alertGain(0.03), startAt: startAt + 0.28 },
-            { duration: 0.5, endFrequency: 986, frequency: 1046.5, gain: alertGain(0.026), startAt: startAt + 0.46 }
+            { duration: 0.42, frequency: 261.63, gain: alertGain(0.038), startAt },
+            { duration: 0.46, frequency: 329.63, gain: alertGain(0.036), startAt: startAt + 0.14 },
+            { duration: 0.52, frequency: 392, gain: alertGain(0.038), startAt: startAt + 0.32 },
+            { duration: 0.68, frequency: 523.25, gain: alertGain(0.034), startAt: startAt + 0.54 }
           ]
         : [
-            { duration: 0.22, endFrequency: 510, frequency: 523.25, gain: alertGain(0.034), startAt },
-            { duration: 0.27, endFrequency: 640, frequency: 659.25, gain: alertGain(0.032), startAt: startAt + 0.1 },
-            { duration: 0.36, endFrequency: 760, frequency: 783.99, gain: alertGain(0.03), startAt: startAt + 0.24 }
+            { duration: 0.36, frequency: 261.63, gain: alertGain(0.04), startAt },
+            { duration: 0.42, frequency: 329.63, gain: alertGain(0.038), startAt: startAt + 0.13 },
+            { duration: 0.52, frequency: 392, gain: alertGain(0.038), startAt: startAt + 0.3 }
           ];
 
       for (const note of notes) {
         pulseTone({
-          attack: 0.014,
+          attack: 0.02,
           duration: note.duration,
-          endFrequency: note.endFrequency,
+          endFrequency: note.frequency * 0.992,
           frequency: note.frequency,
           gain: note.gain,
-          lowpassFrequency: grand ? 2600 : 2800,
-          resonance: 0.92,
+          lowpassFrequency: grand ? 1900 : 1750,
+          resonance: 0.65,
+          reverb: grand ? 0.2 : 0.16,
           startAt: note.startAt,
-          type: "sine"
-        });
-        pulseTone({
-          attack: 0.012,
-          duration: note.duration * 0.78,
-          endFrequency: note.endFrequency * 1.5,
-          frequency: note.frequency * 1.5,
-          gain: note.gain * 0.28,
-          lowpassFrequency: grand ? 3400 : 3600,
-          resonance: 0.88,
-          startAt: note.startAt + 0.01,
           type: "triangle"
         });
-        pulseWarmthLayer({
-          duration: note.duration * 1.08,
-          endFrequency: note.endFrequency * 0.5,
+        pulseTone({
+          attack: 0.026,
+          duration: note.duration * 1.12,
+          endFrequency: note.frequency * 0.496,
           frequency: note.frequency * 0.5,
-          gain: note.gain * 0.4,
-          startAt: note.startAt + 0.012
+          gain: note.gain * 0.42,
+          lowpassFrequency: 820,
+          resonance: 0.45,
+          reverb: grand ? 0.16 : 0.12,
+          startAt: note.startAt + 0.008,
+          type: "sine"
         });
         burstNoise({
-          duration: 0.08,
-          gain: grand ? alertGain(0.028) : alertGain(0.032),
-          highpass: 1400,
-          lowpass: grand ? 5600 : 5200,
+          duration: 0.055,
+          gain: grand ? 0.014 : 0.012,
+          highpass: 420,
+          lowpass: 1750,
+          reverb: 0.035,
           startAt: note.startAt
         });
       }
@@ -358,65 +512,55 @@ function createCardSoundEngine(): CardSoundEngine {
 
       const startAt = context.currentTime + 0.012;
       burstNoise({
-        gain: alertGain(0.04),
-        duration: 0.16,
-        highpass: 900,
-        lowpass: 3400,
+        gain: alertGain(0.026),
+        duration: 0.12,
+        highpass: 220,
+        lowpass: 1150,
+        reverb: 0.025,
         startAt
       });
       pulseTone({
         frequency: 196,
-        endFrequency: 208,
-        gain: alertGain(0.036),
-        duration: 0.26,
-        attack: 0.015,
-        lowpassFrequency: 2300,
-        resonance: 0.92,
+        endFrequency: 185,
+        gain: alertGain(0.046),
+        duration: 0.3,
+        attack: 0.02,
+        lowpassFrequency: 1050,
+        resonance: 0.6,
+        reverb: 0.08,
         startAt,
         type: "triangle"
       });
       pulseTone({
         frequency: 207.65,
-        endFrequency: 220,
-        gain: alertGain(0.027),
-        duration: 0.28,
-        attack: 0.016,
-        lowpassFrequency: 2500,
-        resonance: 0.9,
-        startAt: startAt + 0.04,
-        type: "triangle"
-      });
-      pulseWarmthLayer({
-        duration: 0.34,
-        endFrequency: 104,
-        frequency: 98,
-        gain: alertGain(0.02),
-        startAt: startAt + 0.008
-      });
-      burstNoise({
+        endFrequency: 196,
         gain: alertGain(0.032),
-        duration: 0.12,
-        highpass: 1100,
-        lowpass: 3800,
-        startAt: startAt + 0.19
+        duration: 0.28,
+        attack: 0.022,
+        lowpassFrequency: 1100,
+        resonance: 0.55,
+        reverb: 0.07,
+        startAt: startAt + 0.035,
+        type: "sine"
       });
       pulseTone({
-        frequency: 196,
-        endFrequency: 174.61,
-        gain: alertGain(0.034),
-        duration: 0.38,
-        attack: 0.018,
-        lowpassFrequency: 2200,
-        resonance: 0.88,
-        startAt: startAt + 0.2,
+        frequency: 174.61,
+        endFrequency: 146.83,
+        gain: alertGain(0.044),
+        duration: 0.46,
+        attack: 0.024,
+        lowpassFrequency: 980,
+        resonance: 0.55,
+        reverb: 0.1,
+        startAt: startAt + 0.22,
         type: "triangle"
       });
       pulseWarmthLayer({
-        duration: 0.42,
-        endFrequency: 87.31,
-        frequency: 98,
-        gain: alertGain(0.018),
-        startAt: startAt + 0.208
+        duration: 0.5,
+        endFrequency: 73.42,
+        frequency: 87.31,
+        gain: alertGain(0.024),
+        startAt: startAt + 0.228
       });
     },
     mournLoss: () => {
@@ -427,44 +571,45 @@ function createCardSoundEngine(): CardSoundEngine {
 
       const startAt = context.currentTime + 0.02;
       burstNoise({
-        gain: alertGain(0.024),
-        duration: 0.24,
-        highpass: 180,
-        lowpass: 900,
+        gain: alertGain(0.018),
+        duration: 0.2,
+        highpass: 120,
+        lowpass: 720,
+        reverb: 0.06,
         startAt
       });
 
       const notes = [
         {
-          duration: 0.34,
-          endFrequency: 349.23,
-          frequency: 392,
-          gain: alertGain(0.032),
+          duration: 0.46,
+          endFrequency: 261.63,
+          frequency: 293.66,
+          gain: alertGain(0.04),
           startAt,
           type: "triangle" as const
         },
         {
-          duration: 0.48,
-          endFrequency: 293.66,
-          frequency: 329.63,
-          gain: alertGain(0.028),
-          startAt: startAt + 0.18,
+          duration: 0.58,
+          endFrequency: 196,
+          frequency: 220,
+          gain: alertGain(0.036),
+          startAt: startAt + 0.2,
           type: "sine" as const
         },
         {
-          duration: 0.76,
-          endFrequency: 196,
-          frequency: 246.94,
-          gain: alertGain(0.034),
-          startAt: startAt + 0.42,
+          duration: 0.82,
+          endFrequency: 146.83,
+          frequency: 174.61,
+          gain: alertGain(0.042),
+          startAt: startAt + 0.48,
           type: "triangle" as const
         },
         {
-          duration: 0.86,
-          endFrequency: 130.81,
-          frequency: 164.81,
-          gain: alertGain(0.024),
-          startAt: startAt + 0.44,
+          duration: 0.92,
+          endFrequency: 73.42,
+          frequency: 87.31,
+          gain: alertGain(0.03),
+          startAt: startAt + 0.5,
           type: "sine" as const
         }
       ];
@@ -472,15 +617,16 @@ function createCardSoundEngine(): CardSoundEngine {
       for (const note of notes) {
         pulseTone({
           ...note,
-          attack: 0.02,
-          lowpassFrequency: 2100,
-          resonance: 0.82
+          attack: 0.028,
+          lowpassFrequency: 1050,
+          resonance: 0.55,
+          reverb: 0.14
         });
         pulseWarmthLayer({
           duration: note.duration * 1.08,
           endFrequency: note.endFrequency * 0.5,
           frequency: note.frequency * 0.5,
-          gain: note.gain * 0.44,
+          gain: note.gain * 0.38,
           startAt: note.startAt + 0.012
         });
       }
@@ -490,8 +636,11 @@ function createCardSoundEngine(): CardSoundEngine {
         void audioContext.close();
       }
       audioContext = null;
+      mixBus = null;
       masterGain = null;
+      reverbInput = null;
       noiseBuffer = null;
+      warmWave = null;
     }
   };
 }
@@ -566,6 +715,7 @@ export function useRoomCardSounds(snapshot: RoomState | null) {
       const newestCard = snapshot.pile[snapshot.pile.length - 1];
       engine.place({
         discard: newestCard?.resolution !== "played",
+        star: newestCard?.resolution === "scan_discard",
         count: snapshot.pile.length - previousSnapshot.pile.length
       });
       return;
